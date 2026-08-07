@@ -13,6 +13,6 @@
 
 ## Стек
 
-- Frontend: статичен сайт → Netlify
+- Frontend: статичен сайт → GitHub Pages (custom domain)
 - Backend: Supabase (Postgres, Auth, Storage, Edge Functions)
 - Имейли: Resend (през Edge Function)

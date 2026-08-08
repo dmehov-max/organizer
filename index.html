@@ -59,7 +59,10 @@
     font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
     background: var(--card); color: var(--ink);
   }
-  #nc-name, #ec-name { font-size: 1.15rem; font-weight: 600; padding: 10px 12px; }
+  #nc-name, #ec-name { font-size: 1.4rem; font-weight: 700; padding: 12px 14px; }
+  .eik-hint { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+  .eik-hint.invalid { color: var(--red); }
+  input.input-invalid { border-color: var(--red); }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
   label { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
@@ -125,9 +128,6 @@
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
   .form-table { display: flex; flex-direction: column; gap: 13px; }
   .form-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
-  .form-row-pair { display: flex; gap: 16px; align-items: start; }
-  .form-row-pair > * { flex: 1; min-width: 0; }
-  @media (max-width: 480px) { .form-row-pair { flex-direction: column; gap: 13px; } }
 
   /* --- ЕИК + ДДС, скачени в едно — регистрацията виси буквално "до
      ЕИК-а" (потребителска забележка), с жив preview на ДДС номера. --- */
@@ -286,8 +286,10 @@
         <div class="form-table">
           <div class="form-row"><label for="nc-name">Име</label><input id="nc-name" required /></div>
           <div class="eik-vat-block">
-            <div class="form-row"><label for="nc-eik">ЕИК/ЕГН</label>
-              <input id="nc-eik" required inputmode="numeric" maxlength="9" pattern="\d{9}" placeholder="123456789" /></div>
+            <div class="form-row" style="align-items:start"><label for="nc-eik" style="margin-top:8px">ЕИК/ЕГН</label>
+              <div><input id="nc-eik" required inputmode="numeric" placeholder="123456789" />
+                <div class="eik-hint" id="nc-eik-hint"></div></div>
+            </div>
             <div class="vat-toggle">
               <label class="switch"><input type="checkbox" id="nc-vat" /><span class="switch-track"></span></label>
               <div class="vat-toggle-text">
@@ -322,17 +324,17 @@
       <div class="detail-block" style="margin-bottom:20px">
         <h4>Данни на фирмата</h4>
         <div class="form-table">
-          <div class="form-row-pair">
-            <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
-            <div class="eik-vat-block">
-              <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label>
-                <input id="ec-eik" inputmode="numeric" maxlength="9" pattern="\d{9}" placeholder="123456789" /></div>
-              <div class="vat-toggle">
-                <label class="switch"><input type="checkbox" id="vat-cb-panel" /><span class="switch-track"></span></label>
-                <div class="vat-toggle-text">
-                  <label for="vat-cb-panel">Регистрация по ДДС</label>
-                  <span class="vat-preview" id="ec-vat-preview"></span>
-                </div>
+          <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
+          <div class="eik-vat-block">
+            <div class="form-row" style="align-items:start"><label for="ec-eik" style="margin-top:8px">ЕИК/ЕГН</label>
+              <div><input id="ec-eik" inputmode="numeric" placeholder="123456789" />
+                <div class="eik-hint" id="ec-eik-hint"></div></div>
+            </div>
+            <div class="vat-toggle">
+              <label class="switch"><input type="checkbox" id="vat-cb-panel" /><span class="switch-track"></span></label>
+              <div class="vat-toggle-text">
+                <label for="vat-cb-panel">Регистрация по ДДС</label>
+                <span class="vat-preview" id="ec-vat-preview"></span>
               </div>
             </div>
           </div>
@@ -936,6 +938,34 @@ async function getVatRegistrationTypeId() {
   return vatRegistrationTypeIdCache;
 }
 
+// ЕИК (юридически лица) е точно 9 цифри; ЕГН (физически лица) е
+// точно 10 — полето е общо за двете, затова дължината зависи от
+// избрания тип, не е фиксирана на 9 за всички (би счупило ФЛ).
+function eikExpectedLength(type) {
+  return type === "individual" ? 10 : 9;
+}
+function wireEikValidation(eikInputId, hintId, getType) {
+  const input = document.getElementById(eikInputId);
+  const hint = document.getElementById(hintId);
+  const update = () => {
+    const expected = eikExpectedLength(getType());
+    input.maxLength = expected;
+    const digits = input.value.trim();
+    const valid = digits.length === 0 || digits.length === expected;
+    input.classList.toggle("input-invalid", !valid);
+    hint.classList.toggle("invalid", !valid);
+    hint.textContent = digits.length === 0
+      ? `${expected} цифри`
+      : valid
+        ? ""
+        : `${getType() === "individual" ? "ЕГН" : "ЕИК"} трябва да е ${expected} цифри (в момента ${digits.length})`;
+    return valid && digits.length === expected;
+  };
+  input.addEventListener("input", update);
+  update();
+  return update;
+}
+
 // Жив preview на ДДС номера (BG + ЕИК) до чекбокса "Регистрация по
 // ДДС" — веднага показва какво ще излезе, и предупреждава ако ЕИК-ът
 // не е точно 9 цифри (изискване, изрично посочено от Дойчин).
@@ -957,6 +987,14 @@ function wireVatPreview(eikInputId, vatCbId, previewId) {
 wireVatPreview("nc-eik", "nc-vat", "nc-vat-preview");
 const updateEcVatPreview = wireVatPreview("ec-eik", "vat-cb-panel", "ec-vat-preview");
 
+const updateNcEikHint = wireEikValidation("nc-eik", "nc-eik-hint", () => document.getElementById("nc-type").value);
+document.getElementById("nc-type").addEventListener("change", updateNcEikHint);
+
+// Типът на в момента редактирания клиент — не се сменя от този
+// модал (няма Тип поле там), само определя дължината на ЕИК/ЕГН.
+let currentEditClientType = "legal_entity";
+const updateEcEikHint = wireEikValidation("ec-eik", "ec-eik-hint", () => currentEditClientType);
+
 function openNewClientModal() {
   populateResponsibleSelect();
   // Досие-чекбоксовете още при създаване — задълженията се включват
@@ -971,6 +1009,7 @@ function closeNewClientModal() {
   newClientBackdrop.classList.remove("open");
   document.getElementById("new-client-form").reset();
   document.getElementById("nc-vat-preview").textContent = "";
+  updateNcEikHint();
 }
 
 document.getElementById("open-new-client-btn").addEventListener("click", openNewClientModal);
@@ -986,6 +1025,7 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   const type = document.getElementById("nc-type").value;
   const responsible = document.getElementById("nc-responsible").value;
   if (!name || !eik) return;
+  if (!updateNcEikHint()) { showBanner(`${type === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(type)} цифри.`); return; }
   const { data: newClient, error } = await supabase.from("clients").insert({
     name, eik_egn: eik, type, responsible_user_id: responsible || null,
   }).select("id").single();
@@ -1182,6 +1222,8 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
   document.getElementById("ec-city").value = clientRow?.address_city ?? "";
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
+  currentEditClientType = clientRow?.type ?? "legal_entity";
+  updateEcEikHint();
 
   // Автоматичен запис при напускане на поле (blur) — без бутон
   // "Запази" (махнат по изрична заявка). Обновяваме реда в таблицата
@@ -1192,6 +1234,7 @@ async function toggleClientSettings(tr) {
     const city = document.getElementById("ec-city").value.trim();
     const street = document.getElementById("ec-street").value.trim();
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
+    if (!updateEcEikHint()) { showBanner(`${currentEditClientType === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(currentEditClientType)} цифри — не е записано.`); return; }
     const { error } = await supabase.from("clients")
       .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null }).eq("id", clientId);
     if (error) { showBanner("Грешка при запис: " + error.message); return; }

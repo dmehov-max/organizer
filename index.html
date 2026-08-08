@@ -135,14 +135,30 @@
     </form>
   </div>
 
+  <div id="mfa-challenge-view" style="display:none; max-width:320px; margin:80px auto">
+    <h1>Код за потвърждение</h1>
+    <p class="lede">Отвори приложението за удостоверяване (Google Authenticator и подобни) и въведи 6-цифрения код.</p>
+    <form id="mfa-challenge-form">
+      <input id="mfa-challenge-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456"
+        style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink);font:inherit;letter-spacing:.3em;text-align:center" required />
+      <button class="primary" type="submit" style="width:100%;margin-top:14px;padding:9px">Потвърди</button>
+      <div id="mfa-challenge-error" style="color:var(--red);font-size:.85rem;margin-top:10px;min-height:1.2em"></div>
+    </form>
+  </div>
+
   <div id="app-view" class="wrap" style="display:none">
     <header class="top">
       <h1>Органайзер</h1>
       <div>
         <span class="who" id="who-label"></span>
+        <button id="mfa-setup-btn" style="margin-left:10px">2FA</button>
         <button id="logout-btn" style="margin-left:10px">Изход</button>
       </div>
     </header>
+
+    <div id="mfa-setup-panel" class="table-wrap" style="display:none; padding:16px; margin-bottom:18px">
+      <div id="mfa-setup-status">Зареждане…</div>
+    </div>
 
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">Задачи</button>
@@ -255,6 +271,11 @@ async function logAudit(entityType, entityId, action, details) {
 
 // ---------------- Auth ----------------
 
+const mfaChallengeView = document.getElementById("mfa-challenge-view");
+const mfaChallengeForm = document.getElementById("mfa-challenge-form");
+const mfaChallengeError = document.getElementById("mfa-challenge-error");
+let pendingMfaFactorId = null;
+
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   loginError.textContent = "";
@@ -269,14 +290,46 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
 });
 
 supabase.auth.onAuthStateChange((_event, session) => {
-  if (session) enterApp(); else showLogin();
+  if (session) checkMfaAndProceed(); else showLogin();
 });
 
 function showLogin() {
   loginView.style.display = "block";
+  mfaChallengeView.style.display = "none";
   appView.style.display = "none";
   myProfile = null;
 }
+
+// Проверява дали влезлият потребител има регистрирано 2FA, което
+// още не е потвърдено за тази сесия (AAL1 → AAL2) — SPEC.md §11.
+async function checkMfaAndProceed() {
+  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (error) { console.error(error); return enterApp(); }
+  if (data.nextLevel === "aal2" && data.currentLevel !== data.nextLevel) {
+    loginView.style.display = "none";
+    appView.style.display = "none";
+    mfaChallengeView.style.display = "block";
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    pendingMfaFactorId = factors?.totp?.[0]?.id ?? null;
+  } else {
+    enterApp();
+  }
+}
+
+mfaChallengeForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mfaChallengeError.textContent = "";
+  const code = document.getElementById("mfa-challenge-code").value.trim();
+  if (!pendingMfaFactorId) { mfaChallengeError.textContent = "Не намирам регистриран 2FA фактор."; return; }
+  const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({ factorId: pendingMfaFactorId });
+  if (chErr) { mfaChallengeError.textContent = chErr.message; return; }
+  const { error: vErr } = await supabase.auth.mfa.verify({
+    factorId: pendingMfaFactorId, challengeId: challenge.id, code,
+  });
+  if (vErr) { mfaChallengeError.textContent = "Грешен код. Пробвай пак."; return; }
+  mfaChallengeView.style.display = "none";
+  enterApp();
+});
 
 async function enterApp() {
   loginView.style.display = "none";
@@ -299,6 +352,74 @@ async function enterApp() {
   }
 
   loadTasks();
+  refreshMfaSetupStatus();
+}
+
+// ---------------- Регистрация на 2FA (SPEC.md §11) ----------------
+
+const mfaSetupBtn = document.getElementById("mfa-setup-btn");
+const mfaSetupPanel = document.getElementById("mfa-setup-panel");
+const mfaSetupStatus = document.getElementById("mfa-setup-status");
+
+mfaSetupBtn.addEventListener("click", () => {
+  const opening = mfaSetupPanel.style.display === "none";
+  mfaSetupPanel.style.display = opening ? "block" : "none";
+  if (opening) refreshMfaSetupStatus();
+});
+
+async function refreshMfaSetupStatus() {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error) { mfaSetupStatus.innerHTML = "Грешка: " + escapeHtml(error.message); return; }
+  const verified = (data.totp ?? []).filter((f) => f.status === "verified");
+
+  if (verified.length > 0) {
+    mfaSetupStatus.innerHTML = `
+      <p style="margin:0 0 10px">✅ 2FA е активирано за твоя акаунт.</p>
+      <button class="small" id="mfa-remove-btn">Изключи 2FA</button>
+    `;
+    document.getElementById("mfa-remove-btn").addEventListener("click", async () => {
+      if (!confirm("Сигурен ли си, че искаш да изключиш 2FA?")) return;
+      await supabase.auth.mfa.unenroll({ factorId: verified[0].id });
+      refreshMfaSetupStatus();
+    });
+    return;
+  }
+
+  mfaSetupStatus.innerHTML = `
+    <p style="margin:0 0 10px">2FA не е активирано. Препоръчително е поне за admin акаунта (SPEC.md §11).</p>
+    <button class="small primary" id="mfa-enroll-btn">Активирай 2FA</button>
+    <div id="mfa-enroll-area" style="margin-top:12px"></div>
+  `;
+  document.getElementById("mfa-enroll-btn").addEventListener("click", async () => {
+    // Изчиства недовършени по-стари опити за enroll, иначе Supabase
+    // отказва нов enroll при вече "unverified" фактор.
+    const { data: existing } = await supabase.auth.mfa.listFactors();
+    for (const f of existing?.totp ?? []) {
+      if (f.status !== "verified") await supabase.auth.mfa.unenroll({ factorId: f.id });
+    }
+
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+    if (error) { showBanner("Грешка: " + error.message); return; }
+    const area = document.getElementById("mfa-enroll-area");
+    area.innerHTML = `
+      <p style="font-size:.85rem;color:var(--muted)">Сканирай с приложение за удостоверяване (Google Authenticator и подобни):</p>
+      <div style="max-width:200px">${data.totp.qr_code}</div>
+      <p style="font-size:.78rem;color:var(--muted)">Или въведи ръчно: <code>${escapeHtml(data.totp.secret)}</code></p>
+      <input id="mfa-enroll-code" inputmode="numeric" maxlength="6" placeholder="123456"
+        style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink);letter-spacing:.2em" />
+      <button class="small primary" id="mfa-confirm-btn">Потвърди</button>
+    `;
+    document.getElementById("mfa-confirm-btn").addEventListener("click", async () => {
+      const code = document.getElementById("mfa-enroll-code").value.trim();
+      const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({ factorId: data.id });
+      if (chErr) { showBanner("Грешка: " + chErr.message); return; }
+      const { error: vErr } = await supabase.auth.mfa.verify({ factorId: data.id, challengeId: challenge.id, code });
+      if (vErr) { showBanner("Грешен код, пробвай пак."); return; }
+      logAudit("profile", myProfile.id, "mfa_enabled", null);
+      showBanner("2FA е активирано успешно.", "ok");
+      refreshMfaSetupStatus();
+    });
+  });
 }
 
 // ---------------- Автоматичен изход при неактивност (SPEC.md §11) ----------------
@@ -757,7 +878,7 @@ function appendAiMsg(who, text, cls) {
 // ---------------- Старт ----------------
 
 supabase.auth.getSession().then(({ data: { session } }) => {
-  if (session) enterApp(); else showLogin();
+  if (session) checkMfaAndProceed(); else showLogin();
 });
 </script>
 </body>

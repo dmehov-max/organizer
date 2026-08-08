@@ -161,6 +161,9 @@
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: .85rem; }
   @media (max-width: 560px) { .detail-grid { grid-template-columns: 1fr; } }
   .detail-block h4 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .obligation-group { margin-bottom: 14px; }
+  .obligation-group:last-child { margin-bottom: 0; }
+  .obligation-group h5 { margin: 0 0 4px; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-ink); font-weight: 700; }
   .attachment-item { padding: 6px 0; border-bottom: 1px dashed var(--line); }
   .attachment-item:last-child { border-bottom: none; }
 
@@ -989,6 +992,23 @@ async function loadClients() {
 
 const DOSSIER_FLAGS = { sol: "СОЛ", td: "ТД", gd: "ГД", sol_personal_labor: "СОЛ с личен труд" };
 
+// Честота по типа на deadline_rule (SPEC.md §6 конвенция) — само за
+// групиране в UI, не участва в реалното изчисление на срока.
+function obligationFrequency(rule) {
+  switch (rule?.type) {
+    case "day_of_next_month":
+    case "monthly_advance_zkpo_schedule":
+      return "monthly";
+    case "quarterly_advance_zkpo_schedule":
+    case "quarter_end_plus":
+      return "quarterly";
+    case "fixed_date":
+      return "annual";
+    default: // before_activity_start, manual
+      return "other";
+  }
+}
+
 const editClientBackdrop = document.getElementById("edit-client-backdrop");
 
 document.getElementById("close-edit-client-btn").addEventListener("click", closeClientEdit);
@@ -1116,19 +1136,37 @@ async function toggleClientSettings(tr) {
     };
   }
 
-  // Настройки — всички текущи видове задължения + кои са включени
+  // Настройки — всички текущи видове задължения + кои са включени,
+  // групирани по честота (по искане — плосък списък от ~17 реда
+  // беше трудно за сканиране).
   const { data: obligations } = await supabase
-    .from("obligation_types").select("id, code, name").is("valid_to", null).order("name");
+    .from("obligation_types").select("id, code, name, deadline_rule").is("valid_to", null).order("name");
   const { data: settings } = await supabase
     .from("client_obligation_settings").select("obligation_type_id, enabled").eq("client_id", clientId);
   const enabledIds = new Set((settings ?? []).filter((s) => s.enabled).map((s) => s.obligation_type_id));
 
-  settingsDiv.innerHTML = (obligations ?? []).map((o) => `
-    <div class="check-row">
-      <input type="checkbox" id="obl-cb-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
-      <label for="obl-cb-${o.id}">${escapeHtml(o.name)}</label>
-    </div>
-  `).join("");
+  const FREQUENCY_GROUPS = [
+    { key: "monthly", label: "Месечни" },
+    { key: "quarterly", label: "Тримесечни" },
+    { key: "annual", label: "Годишни" },
+    { key: "other", label: "По събитие / друго" },
+  ];
+  const grouped = Object.fromEntries(FREQUENCY_GROUPS.map((g) => [g.key, []]));
+  for (const o of obligations ?? []) grouped[obligationFrequency(o.deadline_rule)].push(o);
+
+  settingsDiv.innerHTML = FREQUENCY_GROUPS
+    .filter((g) => grouped[g.key].length > 0)
+    .map((g) => `
+      <div class="obligation-group">
+        <h5>${g.label}</h5>
+        ${grouped[g.key].map((o) => `
+          <div class="check-row">
+            <input type="checkbox" id="obl-cb-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
+            <label for="obl-cb-${o.id}">${escapeHtml(o.name)}</label>
+          </div>
+        `).join("")}
+      </div>
+    `).join("");
   settingsDiv.querySelectorAll(".obligation-cb").forEach((cb) => {
     cb.addEventListener("change", async () => {
       cb.disabled = true;

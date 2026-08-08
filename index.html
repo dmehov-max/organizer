@@ -274,11 +274,26 @@
   <div class="modal-backdrop" id="edit-client-backdrop">
     <div class="modal modal-wide">
       <h2 id="edit-client-title">Клиент</h2>
+
+      <div class="detail-block" style="margin-bottom:20px">
+        <h4>Данни на фирмата</h4>
+        <div class="form-table">
+          <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
+          <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label><input id="ec-eik" /></div>
+          <div class="form-row"><label for="ec-address">Адрес на управление</label><input id="ec-address" /></div>
+        </div>
+        <div style="margin-top:12px"><button class="small primary" id="save-company-data-btn">Запази</button></div>
+      </div>
+
       <div class="detail-grid">
         <div class="detail-block">
           <h4>Досие (СОЛ / ТД / ГД)</h4>
           <div id="dossier-panel">Зареждане…</div>
           <div class="check-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+            <input type="checkbox" id="vat-cb-panel" />
+            <label for="vat-cb-panel">Регистрация по ДДС</label>
+          </div>
+          <div class="check-row">
             <input type="checkbox" id="active-cb-panel" />
             <label for="active-cb-panel">Активен клиент</label>
           </div>
@@ -982,7 +997,8 @@ async function toggleClientSettings(tr) {
   // "Активен" живее на самия клиент (clients.active), не е dossier
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
-  const { data: clientRow } = await supabase.from("clients").select("active").eq("id", clientId).single();
+  const { data: clientRow } = await supabase.from("clients")
+    .select("name, eik_egn, address, active").eq("id", clientId).single();
   const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
   activeCb.onchange = async () => {
@@ -998,6 +1014,58 @@ async function toggleClientSettings(tr) {
     }
     activeCb.disabled = false;
   };
+
+  // Данни на фирмата (Име/ЕИК/Адрес) — истинските, немаскирани
+  // стойности идват от базата, не от текста на реда (там ЕГН-то може
+  // да е маскирано за физически лица).
+  document.getElementById("ec-name").value = clientRow?.name ?? "";
+  document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
+  document.getElementById("ec-address").value = clientRow?.address ?? "";
+  const saveBtn = document.getElementById("save-company-data-btn");
+  saveBtn.onclick = async () => {
+    const name = document.getElementById("ec-name").value.trim();
+    const eik = document.getElementById("ec-eik").value.trim();
+    const address = document.getElementById("ec-address").value.trim();
+    if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни."); return; }
+    saveBtn.disabled = true;
+    const { error } = await supabase.from("clients")
+      .update({ name, eik_egn: eik, address: address || null }).eq("id", clientId);
+    saveBtn.disabled = false;
+    if (error) { showBanner("Грешка при запис: " + error.message); return; }
+    logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
+    document.getElementById("edit-client-title").textContent = name;
+    loadClients(); // презарежда реда с правилно маскиране на ЕГН по тип
+    showBanner("Данните са запазени.", "ok");
+  };
+
+  // Регистрация по ДДС — отделна от досие-флаговете таблица
+  // (client_registrations), но потребителски удобно е да се вижда
+  // и превключва от същия модал.
+  const vatCb = document.getElementById("vat-cb-panel");
+  const { data: vatType } = await supabase.from("registration_types").select("id").eq("code", "vat").maybeSingle();
+  if (!vatType) {
+    vatCb.disabled = true;
+  } else {
+    const { data: vatReg } = await supabase.from("client_registrations")
+      .select("id").eq("client_id", clientId).eq("registration_type_id", vatType.id).is("ended_on", null).maybeSingle();
+    vatCb.disabled = false;
+    vatCb.checked = !!vatReg;
+    vatCb.onchange = async () => {
+      vatCb.disabled = true;
+      if (vatCb.checked) {
+        await supabase.from("client_registrations").insert({
+          client_id: clientId, registration_type_id: vatType.id, started_on: todayISO(),
+        });
+      } else {
+        await supabase.from("client_registrations")
+          .update({ ended_on: todayISO() })
+          .eq("client_id", clientId).eq("registration_type_id", vatType.id).is("ended_on", null);
+      }
+      logAudit("client", clientId, "vat_registration_changed", { active: vatCb.checked });
+      vatCb.disabled = false;
+      showBanner("Регистрацията е обновена.", "ok");
+    };
+  }
 
   // Настройки — всички текущи видове задължения + кои са включени
   const { data: obligations } = await supabase

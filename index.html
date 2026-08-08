@@ -205,6 +205,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_AqiAa92i6VGUuwwUGDE0pw_5tqr5ahB";
 // Смени с реалния адрес на ai-helper функцията, ако Supabase ѝ е
 // дал друго име при деплой (виж supabase/functions/ai-helper/README.md).
 const AI_HELPER_URL = `${SUPABASE_URL}/functions/v1/ai-helper`;
+// Истинското деплойнато име на recognize-confirmation функцията е
+// "hyper-handler" (Supabase го генерира случайно при създаването).
+const RECOGNIZE_URL = `${SUPABASE_URL}/functions/v1/hyper-handler`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -461,15 +464,26 @@ async function toggleDetail(tr, task) {
       const path = `${task.id}/${Date.now()}_${file.name}`;
       const { error: upErr } = await supabase.storage.from("attachments").upload(path, file);
       if (upErr) { showBanner("Грешка при качване: " + upErr.message); uploadBtn.disabled = false; return; }
-      const { error: insErr } = await supabase.from("attachments").insert({
+      const { data: newAttachment, error: insErr } = await supabase.from("attachments").insert({
         task_id: task.id, kind: "confirmation", storage_path: path, uploaded_by: myProfile.id,
-      });
+      }).select("id").single();
       if (insErr) { showBanner("Файлът се качи, но записът в базата гръмна: " + insErr.message); return; }
       // Прикачено потвърждение → статус "Подадена" (ако още не е по-напред)
       if (task.status === "waiting" || task.status === "in_progress") {
         await supabase.from("tasks").update({ status: "submitted" }).eq("id", task.id);
       }
       logAudit("attachment", task.id, "confirmation_uploaded", { path });
+
+      // Извикваме разпознаването директно оттук (вместо Database
+      // Webhook — блокиран от бъг в Supabase, липсваща схема
+      // "supabase_functions"). Не чакаме резултата за UI-то, но
+      // хващаме грешка тихо, за да не развали usera experience.
+      fetch(RECOGNIZE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record: { id: newAttachment.id, task_id: task.id, storage_path: path, kind: "confirmation" } }),
+      }).catch(() => {});
+
       showBanner("Потвърждението е качено.", "ok");
       loadTasks();
     });

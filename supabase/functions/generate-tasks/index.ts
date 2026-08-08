@@ -182,7 +182,7 @@ Deno.serve(async (_req: Request) => {
       .select(`
         enabled,
         clients ( id, active, responsible_user_id ),
-        obligation_types ( id, deadline_rule, valid_to )
+        obligation_types ( id, deadline_rule, valid_to, requires_payment )
       `)
       .eq("enabled", true);
     if (rowsErr) throw rowsErr;
@@ -203,16 +203,20 @@ Deno.serve(async (_req: Request) => {
       for (const p of periods) {
         const dueDate = shiftToBusinessDay(p.dueDateRaw, holidaySet);
 
-        const { error: insertErr } = await supabase.from("tasks").insert({
-          client_id: client.id,
-          obligation_type_id: obligation.id,
-          period_label: p.periodLabel,
-          period_start: p.periodStart,
-          period_end: p.periodEnd,
-          assigned_user_id: client.responsible_user_id,
-          due_date: dueDate,
-          status: "waiting",
-        });
+        const { data: insertedTask, error: insertErr } = await supabase
+          .from("tasks")
+          .insert({
+            client_id: client.id,
+            obligation_type_id: obligation.id,
+            period_label: p.periodLabel,
+            period_start: p.periodStart,
+            period_end: p.periodEnd,
+            assigned_user_id: client.responsible_user_id,
+            due_date: dueDate,
+            status: "waiting",
+          })
+          .select("id")
+          .single();
 
         if (insertErr) {
           if ((insertErr as any).code === "23505") {
@@ -224,6 +228,22 @@ Deno.serve(async (_req: Request) => {
           }
         } else {
           created++;
+
+          // Ако задължението поражда плащане, създаваме и записа за
+          // него още сега — сумата (amount_due) остава null, докато
+          // някой я въведе ръчно или я извлечем от потвърждението
+          // (recognize-confirmation, засега само за ГДД оборота, не
+          // за самата дължима сума). Срокът за плащане по подразбиране
+          // = срокът за подаване, освен ако конкретното задължение не
+          // казва друго (в каталога засега винаги съвпадат — SPEC.md §6).
+          if (obligation.requires_payment && insertedTask) {
+            const { error: paymentErr } = await supabase.from("task_payments").insert({
+              task_id: insertedTask.id,
+              due_date: dueDate,
+              paid: false,
+            });
+            if (paymentErr) errors.push(`payment for ${insertedTask.id}: ${paymentErr.message}`);
+          }
         }
       }
     }

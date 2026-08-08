@@ -110,7 +110,9 @@ Deno.serve(async (req: Request) => {
     const { text } = await extractText(pdf, { mergePages: true });
 
     const marker = classify(text);
-    const excerpt = text.slice(0, 800);
+    // ВРЕМЕННО за диагностика — цял текст, не откъс. Ще върнем 800
+    // символа обратно, щом regex-ът за отхвърлени/приети е потвърден.
+    const excerpt = text.slice(0, 4000);
 
     await supabase.from("attachments").update({
       recognized_text_excerpt: excerpt,

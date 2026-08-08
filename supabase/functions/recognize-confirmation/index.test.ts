@@ -9,7 +9,15 @@
 // преждевременно и никога не стигаше до истинското число.
 
 import { assertEquals } from "jsr:@std/assert";
-import { classify, guessTurnover } from "./index.ts";
+import {
+  classify,
+  companyNamesMatch,
+  extractDeclaredCompanyName,
+  extractDeclaredEik,
+  extractReferenceNumber,
+  guessTurnover,
+  normalizeCompanyName,
+} from "./index.ts";
 
 // ---------- classify() — реален формат на Обр. 1/6 съобщение ----------
 
@@ -89,4 +97,61 @@ Deno.test("guessTurnover: намира число след 'оборот'", () =
 
 Deno.test("guessTurnover: връща null, ако няма съвпадение", () => {
   assertEquals(guessTurnover("Текст без финансови данни."), null);
+});
+
+// ---------- extractReferenceNumber() — реални формати ----------
+
+Deno.test("extractReferenceNumber: ДДС формат 'ВХОДЯЩ НОМЕР НА ДАННИТЕ'", () => {
+  const text = "ВХОДЯЩ НОМЕР НА ДАННИТЕ: ДДС.2215-2676743\nДАТА: 13/02/2026";
+  assertEquals(extractReferenceNumber(text), "ДДС.2215-2676743");
+});
+
+Deno.test("extractReferenceNumber: чл.55/Обр.1-6 формат 'Вх. №'", () => {
+  assertEquals(extractReferenceNumber("Вх. №: 2215И0741032 / 24.07.2026"), "2215И0741032");
+  assertEquals(extractReferenceNumber("Вх. № 30E012889408/20.07.2026 13:45:42"), "30E012889408");
+});
+
+Deno.test("extractReferenceNumber: null при липса на входящ номер", () => {
+  assertEquals(extractReferenceNumber("Съвсем друг текст."), null);
+});
+
+// ---------- extractDeclaredEik() ----------
+
+Deno.test("extractDeclaredEik: 'ЕГН/ЛНЧ/Сл.номер/ЕИК по БУЛСТАТ'", () => {
+  const text = "ЕГН/ЛНЧ/Сл.номер/ЕИК по БУЛСТАТ: 175323940";
+  assertEquals(extractDeclaredEik(text), "175323940");
+});
+
+Deno.test("extractDeclaredEik: ДДС номер формат BG+ЕИК", () => {
+  const text = "постъпили от: КОРЕКТ - ОПАКОВКИ ООД , с VIN BG205970324";
+  assertEquals(extractDeclaredEik(text), "205970324");
+});
+
+Deno.test("extractDeclaredEik: null при липса", () => {
+  assertEquals(extractDeclaredEik("Текст без ЕИК."), null);
+});
+
+// ---------- extractDeclaredCompanyName() ----------
+
+Deno.test("extractDeclaredCompanyName: 'Името на:' формат", () => {
+  assertEquals(extractDeclaredCompanyName("Името на: ЕЙНДЖЪЛ СТИЛ\nЕГН/ЛНЧ..."), "ЕЙНДЖЪЛ СТИЛ");
+});
+
+// ---------- normalizeCompanyName() / companyNamesMatch() ----------
+
+Deno.test("normalizeCompanyName: маха правна форма и пунктуация", () => {
+  assertEquals(normalizeCompanyName("КОРЕКТ - ОПАКОВКИ ООД"), "корект опаковки");
+  assertEquals(normalizeCompanyName("Корект Опаковки"), "корект опаковки");
+});
+
+Deno.test("companyNamesMatch: съвпада въпреки различно изписване", () => {
+  assertEquals(companyNamesMatch("КОРЕКТ - ОПАКОВКИ ООД", "Корект Опаковки"), true);
+});
+
+Deno.test("companyNamesMatch: различни фирми не съвпадат", () => {
+  assertEquals(companyNamesMatch("ЕЙНДЖЪЛ СТИЛ", "ТЕСТ ЕООД"), false);
+});
+
+Deno.test("companyNamesMatch: празен вход не вдига лъжлива тревога", () => {
+  assertEquals(companyNamesMatch("", "Корект Опаковки"), true);
 });

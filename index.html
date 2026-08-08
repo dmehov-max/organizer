@@ -534,12 +534,21 @@ async function loadTasks() {
       }
 
       if (needsConfirmation) {
-        const { count } = await supabase
+        const { data: latestConfirmation } = await supabase
           .from("attachments")
-          .select("id", { count: "exact", head: true })
-          .eq("task_id", btn.dataset.id).eq("kind", "confirmation");
-        if (!count || count === 0) {
+          .select("id, client_name_mismatch, duplicate_of_attachment_id")
+          .eq("task_id", btn.dataset.id).eq("kind", "confirmation")
+          .order("uploaded_at", { ascending: false }).limit(1).maybeSingle();
+        if (!latestConfirmation) {
           showBanner("Няма прикачено потвърждение — качи го първо (разгъни задачата), преди да я завършиш.");
+          return;
+        }
+        if (latestConfirmation.client_name_mismatch) {
+          showBanner("Потвърждението изглежда за ДРУГА фирма — провери преди да завършиш (виж бележката в детайлите на задачата).");
+          return;
+        }
+        if (latestConfirmation.duplicate_of_attachment_id) {
+          showBanner("Този входящ номер вече е качен друг път — провери дали не е дублирано, преди да завършиш.");
           return;
         }
       }
@@ -591,7 +600,8 @@ async function toggleDetail(tr, task) {
 
   // Прикачени файлове
   const { data: attachments } = await supabase
-    .from("attachments").select("id, kind, uploaded_at, recognized_marker")
+    .from("attachments")
+    .select("id, kind, uploaded_at, recognized_marker, recognized_reference_number, recognized_client_name, client_name_mismatch, duplicate_of_attachment_id")
     .eq("task_id", task.id).order("uploaded_at", { ascending: false });
   const attList = document.getElementById(`attachments-list-${task.id}`);
   if (!attachments || attachments.length === 0) {
@@ -602,6 +612,9 @@ async function toggleDetail(tr, task) {
         ${a.kind === "confirmation" ? "Потвърждение" : a.kind === "payment_proof" ? "Доказателство за плащане" : "Друго"}
         — ${new Date(a.uploaded_at).toLocaleString("bg-BG")}
         ${a.recognized_marker ? `<span class="pill pill-${a.recognized_marker}" style="margin-left:6px">${a.recognized_marker === "accepted" ? "разпознато: прието" : "разпознато: отказано"}</span>` : ""}
+        ${a.recognized_reference_number ? `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">Вх. № ${escapeHtml(a.recognized_reference_number)}${a.recognized_client_name ? " · " + escapeHtml(a.recognized_client_name) : ""}</div>` : ""}
+        ${a.duplicate_of_attachment_id ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ дублиран входящ номер — вече качен друг път</span></div>` : ""}
+        ${a.client_name_mismatch ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ документът е за друга фирма — провери!</span></div>` : ""}
       </div>
     `).join("");
   }

@@ -204,7 +204,9 @@ const SUPABASE_URL = "https://ekyvbmokklfyrjkshuuu.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AqiAa92i6VGUuwwUGDE0pw_5tqr5ahB";
 // Смени с реалния адрес на ai-helper функцията, ако Supabase ѝ е
 // дал друго име при деплой (виж supabase/functions/ai-helper/README.md).
-const AI_HELPER_URL = `${SUPABASE_URL}/functions/v1/ai-helper`;
+// Истинското деплойнато име е "super-handler" (Supabase го генерира
+// случайно при създаването, не "ai-helper").
+const AI_HELPER_URL = `${SUPABASE_URL}/functions/v1/super-handler`;
 // Истинското деплойнато име на recognize-confirmation функцията е
 // "hyper-handler" (Supabase го генерира случайно при създаването).
 const RECOGNIZE_URL = `${SUPABASE_URL}/functions/v1/hyper-handler`;

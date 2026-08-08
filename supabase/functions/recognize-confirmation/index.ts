@@ -45,7 +45,7 @@ const REJECT_MARKERS = ["не е приета", "не е приет", "греш�
  *     междинната част ([^:\d]) спираше regex-а преждевременно, преди да
  *     стигне до истинското двоеточие. Сега позволяваме всичко освен
  *     двоеточие (non-greedy до първото ":"), не само "не-цифри". */
-function classify(text: string): "accepted" | "rejected" | null {
+export function classify(text: string): "accepted" | "rejected" | null {
   const textLower = text.toLowerCase();
 
   const rejectedCounts = [...textLower.matchAll(/отхвърлени[^:]*?:\s*(\d+)/g)]
@@ -64,7 +64,7 @@ function classify(text: string): "accepted" | "rejected" | null {
  * "нетни приходи от продажби" последван от число. Трябва да се
  * калибрира срещу реален образец на ГДД потвърждение, който още
  * нямаме — засега е поставено място, не завършена логика. */
-function guessTurnover(text: string): number | null {
+export function guessTurnover(text: string): number | null {
   const patterns = [
     /нетни\s+приходи\s+от\s+продажби[^\d]{0,40}([\d\s]+[.,]\d{2})/i,
     /оборот[^\d]{0,40}([\d\s]+[.,]\d{2})/i,
@@ -79,7 +79,15 @@ function guessTurnover(text: string): number | null {
   return null;
 }
 
-Deno.serve(async (req: Request) => {
+// import.meta.main е true само когато Deno изпълнява ТОЗИ файл пряко
+// (production, Supabase Edge Runtime) — не и когато тестов файл го
+// импортира само за да ползва export-натите чисти функции по-горе.
+// Иначе Deno.serve() би стартирал сървър при всяко "deno test".
+if (import.meta.main) {
+  Deno.serve(handler);
+}
+
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -163,4 +171,4 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-});
+}

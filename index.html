@@ -397,6 +397,11 @@ async function loadTasks() {
       const task = data.find((t) => t.id === btn.dataset.id);
       const needsConfirmation = task?.obligation_types?.requires_confirmation_upload !== false;
 
+      if (task?.confirmation_status === "rejected") {
+        showBanner("Потвърждението е разпознато като ОТКАЗАНО от НАП — задачата не може да е завършена, докато не подадеш коригирана декларация и качиш ново потвърждение.");
+        return;
+      }
+
       if (needsConfirmation) {
         const { count } = await supabase
           .from("attachments")

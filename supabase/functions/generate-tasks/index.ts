@@ -25,7 +25,7 @@ const SOFIA_TZ = "Europe/Sofia";
 // Дата помощни функции
 // ---------------------------------------------------------------
 
-function sofiaToday(): { y: number; m: number; d: number } {
+export function sofiaToday(): { y: number; m: number; d: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: SOFIA_TZ,
     year: "numeric",
@@ -36,31 +36,31 @@ function sofiaToday(): { y: number; m: number; d: number } {
   return { y: get("year"), m: get("month"), d: get("day") };
 }
 
-function pad(n: number): string {
+export function pad(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-function toISODate(y: number, m: number, d: number): string {
+export function toISODate(y: number, m: number, d: number): string {
   return `${y.toString().padStart(4, "0")}-${pad(m)}-${pad(d)}`;
 }
 
-function weekday(y: number, m: number, d: number): number {
+export function weekday(y: number, m: number, d: number): number {
   // 0=неделя..6=събота; смята се през UTC, за да няма дрейф от TZ.
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-function lastDayOfMonth(y: number, m: number): number {
+export function lastDayOfMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
-function addMonths(y: number, m: number, months: number): { y: number; m: number } {
+export function addMonths(y: number, m: number, months: number): { y: number; m: number } {
   const idx = y * 12 + (m - 1) + months;
   return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
 }
 
 /** чл. 22, ал. 7 ДОПК: пренася до следващия работен ден, ако пада в
  * събота, неделя или официален празник (виж таблица `holidays`). */
-function shiftToBusinessDay(iso: string, holidaySet: Set<string>): string {
+export function shiftToBusinessDay(iso: string, holidaySet: Set<string>): string {
   let [y, m, d] = iso.split("-").map(Number);
   for (let guard = 0; guard < 30; guard++) {
     const wd = weekday(y, m, d);

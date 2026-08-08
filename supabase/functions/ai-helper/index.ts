@@ -98,7 +98,11 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-5",
-        max_tokens: 500,
+        // 500 се оказа твърде малко — реален отговор спираше по средата
+        // на изречение (виж git история). Вдигнато с голям запас, тъй
+        // като системният промпт вече казва "кратко и конкретно" —
+        // таванът е предпазна мрежа, не цел.
+        max_tokens: 2048,
         system: BASE_PROMPT + contextBlock,
         messages,
       }),

@@ -977,10 +977,20 @@ aiForm.addEventListener("submit", async (e) => {
   }
 });
 
+// Минимално форматиране на отговора — само **удебелено** и нови
+// редове. Първо escape-ваме (сигурност), после връщаме точно тези
+// два маркера обратно като HTML — суров текст с "**" и слепени
+// изречения без нов ред изглеждаше нечетимо (флагнато от потребител).
+function renderAiText(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\n/g, "<br>");
+}
+
 function appendAiMsg(who, text, cls) {
   const div = document.createElement("div");
   div.className = cls;
-  div.innerHTML = `<b>${escapeHtml(who)}</b>${escapeHtml(text)}`;
+  div.innerHTML = `<b>${escapeHtml(who)}</b>${renderAiText(text)}`;
   aiLog.appendChild(div);
   aiLog.scrollTop = aiLog.scrollHeight;
 }

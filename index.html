@@ -352,7 +352,7 @@ async function enterApp() {
   }
 
   loadTasks();
-  refreshMfaSetupStatus();
+  refreshMfaSetupStatus({ autoPrompt: true });
 }
 
 // ---------------- Регистрация на 2FA (SPEC.md §11) ----------------
@@ -367,10 +367,20 @@ mfaSetupBtn.addEventListener("click", () => {
   if (opening) refreshMfaSetupStatus();
 });
 
-async function refreshMfaSetupStatus() {
+async function refreshMfaSetupStatus(opts) {
   const { data, error } = await supabase.auth.mfa.listFactors();
   if (error) { mfaSetupStatus.innerHTML = "Грешка: " + escapeHtml(error.message); return; }
   const verified = (data.totp ?? []).filter((f) => f.status === "verified");
+
+  // Изисква се 2FA за всички служители (не само admin, по изрично
+  // решение) — при първи вход без регистрирано 2FA панелът се
+  // отваря автоматично, с ясно съобщение, вместо да чака да намери
+  // бутона сам. Не е твърда блокировка (не спира достъпа до
+  // останалото приложение), за да няма риск от заключване при бъг.
+  if (verified.length === 0 && opts?.autoPrompt) {
+    mfaSetupPanel.style.display = "block";
+    showBanner("Изисква се активиране на 2FA за твоя акаунт — виж панела по-долу.");
+  }
 
   if (verified.length > 0) {
     mfaSetupStatus.innerHTML = `

@@ -1,17 +1,15 @@
 // Органайзер — разпознаване на прикачени потвърждения (SPEC.md §4, §11).
 //
-// Тригерва се от Supabase Database Webhook на INSERT в `attachments`
-// (виж README в тази папка за настройка — needs manual setup в
-// таблото, не е част от кода). Payload формат от Database Webhooks:
-//   { type: "INSERT", table: "attachments", record: {...}, ... }
+// Извиква се директно от index.html след успешно качване на файл
+// (Database Webhook подходът е блокиран от бъг в Supabase — липсваща
+// схема "supabase_functions", виж git история). Приема плоско тяло
+// { record: { id, task_id, storage_path, kind } }.
 //
 // Действие:
 //  1. Изтегля файла от частния Storage bucket "attachments".
-//  2. Извлича текста (PDF → текст, библиотека "unpdf" — избрана
-//     защото работи в edge/serverless среда без нативни зависимости;
-//     НЕ Е ТЕСТВАНА НА ЖИВО още, вижте README).
+//  2. Извлича текста (PDF → текст, библиотека "unpdf").
 //  3. Търси маркери за приемане/отказ (по образец от реални
-//     потвърждения на НАП — SPEC.md, разговора при изграждането).
+//     потвърждения на НАП).
 //  4. Записва откъса + маркера в attachments; ако е разпознато,
 //     обновява tasks.confirmation_status — но НЕ сменя tasks.status
 //     автоматично (човек потвърждава изрично, SPEC.md §4 — риск от
@@ -24,6 +22,15 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractText, getDocumentProxy } from "npm:unpdf";
+
+// CORS — без това браузърът блокира извикването от GitHub Pages към
+// Supabase (preflight OPTIONS не получава отговор с правилни хедъри).
+// Открито при първи реален тест: функцията изобщо не се стартираше.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
 const ACCEPT_MARKERS = ["е приета", "уведомление за приемане", "прието", "успешно подадена"];
 const REJECT_MARKERS = ["не е приета", "не е приет", "грешка", "неуспешно"];
@@ -69,6 +76,10 @@ function guessTurnover(text: string): number | null {
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -85,7 +96,7 @@ Deno.serve(async (req: Request) => {
 
     if (kind !== "confirmation") {
       return new Response(JSON.stringify({ ok: true, skipped: "not a confirmation" }), {
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -140,12 +151,12 @@ Deno.serve(async (req: Request) => {
     });
 
     return new Response(JSON.stringify({ ok: true, marker }), {
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: String(e) }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

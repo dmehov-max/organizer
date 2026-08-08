@@ -18,6 +18,15 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// CORS — без това браузърът блокира извикването от GitHub Pages към
+// Supabase (preflight OPTIONS без правилни хедъри). Виж същия
+// проблем и поправка в recognize-confirmation.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -59,14 +68,17 @@ async function buildUserContext(authHeader: string | null): Promise<string> {
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "POST only" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "POST only" }), { status: 405, headers: corsHeaders });
   }
 
   try {
     const { message, history } = await req.json();
     if (!message || typeof message !== "string") {
-      return new Response(JSON.stringify({ error: "Missing 'message'" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Missing 'message'" }), { status: 400, headers: corsHeaders });
     }
 
     const authHeader = req.headers.get("Authorization");
@@ -94,16 +106,16 @@ Deno.serve(async (req: Request) => {
 
     if (!res.ok) {
       const body = await res.text();
-      return new Response(JSON.stringify({ error: `Anthropic ${res.status}: ${body}` }), { status: 502 });
+      return new Response(JSON.stringify({ error: `Anthropic ${res.status}: ${body}` }), { status: 502, headers: corsHeaders });
     }
 
     const data = await res.json();
     const reply = data.content?.[0]?.text ?? "(няма отговор)";
 
     return new Response(JSON.stringify({ reply }), {
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500 });
+    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders });
   }
 });

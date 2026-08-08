@@ -26,9 +26,23 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractText, getDocumentProxy } from "npm:unpdf";
 
 const ACCEPT_MARKERS = ["е приета", "уведомление за приемане", "прието", "успешно подадена"];
-const REJECT_MARKERS = ["отхвърл", "не е приета", "не е приет", "грешка", "неуспешно"];
+const REJECT_MARKERS = ["не е приета", "не е приет", "грешка", "неуспешно"];
 
-function classify(textLower: string): "accepted" | "rejected" | null {
+/** Реален образец (Обр. 1/6 съобщение от НАП) не пише просто "приета"/
+ * "отхвърлена" — брои: "Брой отхвърлени Декларации обр.1:0". Проста
+ * проверка за думата "отхвърл" щеше грешно да маркира ПРИЕТ документ
+ * като отказан, само защото думата се среща с нула до себе си —
+ * открито при първи реален тест с истински файл. Затова: първо
+ * търсим бройката и гледаме числото, не само присъствието на думата. */
+function classify(text: string): "accepted" | "rejected" | null {
+  const textLower = text.toLowerCase();
+
+  const rejectedCounts = [...textLower.matchAll(/отхвърлени[^:\d]*:\s*(\d+)/g)]
+    .map((m) => Number(m[1]));
+  if (rejectedCounts.length > 0) {
+    return rejectedCounts.some((n) => n > 0) ? "rejected" : "accepted";
+  }
+
   if (REJECT_MARKERS.some((m) => textLower.includes(m))) return "rejected";
   if (ACCEPT_MARKERS.some((m) => textLower.includes(m))) return "accepted";
   return null;
@@ -83,9 +97,8 @@ Deno.serve(async (req: Request) => {
     const buf = new Uint8Array(await fileBlob.arrayBuffer());
     const pdf = await getDocumentProxy(buf);
     const { text } = await extractText(pdf, { mergePages: true });
-    const textLower = text.toLowerCase();
 
-    const marker = classify(textLower);
+    const marker = classify(text);
     const excerpt = text.slice(0, 800);
 
     await supabase.from("attachments").update({

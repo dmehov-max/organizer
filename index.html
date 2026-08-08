@@ -114,7 +114,9 @@
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     width: 100%; max-width: 420px; padding: 22px 24px;
     box-shadow: 0 24px 70px -24px rgba(0,0,0,.45);
+    max-height: 88vh; overflow-y: auto;
   }
+  .modal.modal-wide { max-width: 640px; }
   .modal h2 { font-size: 1.05rem; margin: 0 0 18px; }
   /* полетата подредени като таблица — етикет отляво, стойност
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
@@ -156,8 +158,8 @@
 
   /* --- детайли на задача/клиент --- */
   .detail-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; }
-  tr.detail-row td { background: var(--paper); padding: 16px 20px; }
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: .85rem; }
+  @media (max-width: 560px) { .detail-grid { grid-template-columns: 1fr; } }
   .detail-block h4 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .attachment-item { padding: 6px 0; border-bottom: 1px dashed var(--line); }
   .attachment-item:last-child { border-bottom: none; }
@@ -266,6 +268,29 @@
           <button class="primary" type="submit">Създай</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="edit-client-backdrop">
+    <div class="modal modal-wide">
+      <h2 id="edit-client-title">Клиент</h2>
+      <div class="detail-grid">
+        <div class="detail-block">
+          <h4>Досие (СОЛ / ТД / ГД)</h4>
+          <div id="dossier-panel">Зареждане…</div>
+          <div class="check-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+            <input type="checkbox" id="active-cb-panel" />
+            <label for="active-cb-panel">Активен клиент</label>
+          </div>
+        </div>
+        <div class="detail-block">
+          <h4>Настройки — кои задължения важат</h4>
+          <div id="settings-panel" style="max-height:320px;overflow-y:auto">Зареждане…</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="close-edit-client-btn">Затвори</button>
+      </div>
     </div>
   </div>
 
@@ -902,39 +927,38 @@ async function loadClients() {
 
 const DOSSIER_FLAGS = { sol: "СОЛ", td: "ТД", gd: "ГД" };
 
-async function toggleClientSettings(tr) {
-  const existing = tr.nextElementSibling;
-  if (existing && existing.classList.contains("detail-row")) { existing.remove(); return; }
-  document.querySelectorAll(".detail-row").forEach((r) => r.remove());
+const editClientBackdrop = document.getElementById("edit-client-backdrop");
 
+document.getElementById("close-edit-client-btn").addEventListener("click", closeClientEdit);
+editClientBackdrop.addEventListener("click", (e) => { if (e.target === editClientBackdrop) closeClientEdit(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && editClientBackdrop.classList.contains("open")) closeClientEdit(); });
+
+function closeClientEdit() {
+  editClientBackdrop.classList.remove("open");
+}
+
+// Отваря досието на клиент в отделен прозорец (модал) вместо ред,
+// разгънат вътре в таблицата — по изрична заявка (предишното
+// подреждане "отдолу" изглеждаше разхвърляно).
+async function toggleClientSettings(tr) {
   const clientId = tr.dataset.id;
-  const detailTr = document.createElement("tr");
-  detailTr.className = "detail-row";
-  detailTr.innerHTML = `<td colspan="6"><div class="detail-grid">
-    <div class="detail-block">
-      <h4>Досие (СОЛ / ТД / ГД)</h4>
-      <div id="dossier-${clientId}">Зареждане…</div>
-      <div class="check-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
-        <input type="checkbox" id="active-cb-${clientId}" class="active-cb" />
-        <label for="active-cb-${clientId}">Активен клиент</label>
-      </div>
-    </div>
-    <div class="detail-block">
-      <h4>Настройки — кои задължения важат</h4>
-      <div id="settings-${clientId}" style="max-height:260px;overflow-y:auto">Зареждане…</div>
-    </div>
-  </div></td>`;
-  tr.after(detailTr);
+  const clientName = tr.children[0].textContent;
+  document.getElementById("edit-client-title").textContent = clientName;
+  editClientBackdrop.classList.add("open");
+
+  const dossierDiv = document.getElementById("dossier-panel");
+  const settingsDiv = document.getElementById("settings-panel");
+  dossierDiv.innerHTML = "Зареждане…";
+  settingsDiv.innerHTML = "Зареждане…";
 
   // Досие — текущо активни флагове (ended_on is null)
   const { data: flags } = await supabase
     .from("client_dossier_flags").select("id, flag").eq("client_id", clientId).is("ended_on", null);
   const activeFlags = new Set((flags ?? []).map((f) => f.flag));
-  const dossierDiv = document.getElementById(`dossier-${clientId}`);
   dossierDiv.innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
     <div class="check-row">
-      <input type="checkbox" id="dossier-cb-${clientId}-${code}" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} />
-      <label for="dossier-cb-${clientId}-${code}">${label}</label>
+      <input type="checkbox" id="dossier-cb-${code}" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} />
+      <label for="dossier-cb-${code}">${label}</label>
     </div>
   `).join("");
   dossierDiv.querySelectorAll(".dossier-cb").forEach((cb) => {
@@ -959,9 +983,9 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients").select("active").eq("id", clientId).single();
-  const activeCb = document.getElementById(`active-cb-${clientId}`);
+  const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
-  activeCb.addEventListener("change", async () => {
+  activeCb.onchange = async () => {
     activeCb.disabled = true;
     const { error } = await supabase.from("clients").update({ active: activeCb.checked }).eq("id", clientId);
     if (error) {
@@ -969,11 +993,11 @@ async function toggleClientSettings(tr) {
       activeCb.checked = !activeCb.checked;
     } else {
       logAudit("client", clientId, "active_changed", { active: activeCb.checked });
-      tr.children[4].textContent = activeCb.checked ? "да" : "не"; // без loadClients() — да не се затвори панелът
+      tr.children[4].textContent = activeCb.checked ? "да" : "не";
       showBanner("Обновено.", "ok");
     }
     activeCb.disabled = false;
-  });
+  };
 
   // Настройки — всички текущи видове задължения + кои са включени
   const { data: obligations } = await supabase
@@ -982,11 +1006,10 @@ async function toggleClientSettings(tr) {
     .from("client_obligation_settings").select("obligation_type_id, enabled").eq("client_id", clientId);
   const enabledIds = new Set((settings ?? []).filter((s) => s.enabled).map((s) => s.obligation_type_id));
 
-  const settingsDiv = document.getElementById(`settings-${clientId}`);
   settingsDiv.innerHTML = (obligations ?? []).map((o) => `
     <div class="check-row">
-      <input type="checkbox" id="obl-cb-${clientId}-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
-      <label for="obl-cb-${clientId}-${o.id}">${escapeHtml(o.name)}</label>
+      <input type="checkbox" id="obl-cb-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
+      <label for="obl-cb-${o.id}">${escapeHtml(o.name)}</label>
     </div>
   `).join("");
   settingsDiv.querySelectorAll(".obligation-cb").forEach((cb) => {

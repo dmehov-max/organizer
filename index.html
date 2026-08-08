@@ -471,7 +471,8 @@ async function loadTasks() {
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
       clients ( name ),
-      obligation_types ( name, requires_payment, requires_confirmation_upload )
+      obligation_types ( name, requires_payment, requires_confirmation_upload ),
+      attachments ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
     `)
     .order("due_date", { ascending: true });
 
@@ -486,6 +487,10 @@ async function loadTasks() {
     tr.dataset.id = t.id;
     const overdue = t.due_date < today && t.status !== "completed";
     const nextStatus = NEXT_STATUS[t.status];
+    const confirmations = (t.attachments ?? [])
+      .filter((a) => a.kind === "confirmation")
+      .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+    const latestConfirmation = confirmations[0] ?? null;
     tr.innerHTML = `
       <td>${escapeHtml(t.clients?.name ?? "?")}</td>
       <td>${escapeHtml(t.obligation_types?.name ?? "?")}</td>
@@ -495,6 +500,9 @@ async function loadTasks() {
         <span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span>
         ${t.confirmation_status === "accepted" ? '<span class="pill pill-accepted">потвърд. прието</span>' : ""}
         ${t.confirmation_status === "rejected" ? '<span class="pill pill-rejected">потвърд. отказано</span>' : ""}
+        ${latestConfirmation?.recognized_reference_number ? `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">Вх. № ${escapeHtml(latestConfirmation.recognized_reference_number)}</div>` : ""}
+        ${latestConfirmation?.client_name_mismatch ? `<div style="margin-top:2px"><span class="pill pill-rejected">⚠ друга фирма</span></div>` : ""}
+        ${latestConfirmation?.duplicate_of_attachment_id ? `<div style="margin-top:2px"><span class="pill pill-rejected">⚠ дублиран №</span></div>` : ""}
       </td>
       <td>${usersById[t.assigned_user_id] ?? "—"}</td>
       <td class="row-actions">

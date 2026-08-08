@@ -1244,7 +1244,7 @@ async function toggleClientSettings(tr) {
   // групирани по честота (по искане — плосък списък от ~17 реда
   // беше трудно за сканиране).
   const { data: obligations } = await supabase
-    .from("obligation_types").select("id, code, name, deadline_rule").is("valid_to", null).order("name");
+    .from("obligation_types").select("id, code, name, deadline_rule, trigger_type").is("valid_to", null).order("name");
   const { data: settings } = await supabase
     .from("client_obligation_settings").select("obligation_type_id, enabled").eq("client_id", clientId);
   const enabledIds = new Set((settings ?? []).filter((s) => s.enabled).map((s) => s.obligation_type_id));
@@ -1254,9 +1254,16 @@ async function toggleClientSettings(tr) {
     { key: "quarterly", label: "Тримесечни" },
     { key: "annual", label: "Годишни" },
     { key: "other", label: "По събитие / друго" },
+    // По изрична заявка — ЕСТИ/туристическото настаняване е нишова
+    // дейност (само за клиенти с краткосрочно отдаване под наем),
+    // затова е последна група, не смесена по дата с останалите.
+    { key: "tourism", label: "Туристическо настаняване (ЕСТИ)" },
   ];
   const grouped = Object.fromEntries(FREQUENCY_GROUPS.map((g) => [g.key, []]));
-  for (const o of obligations ?? []) grouped[obligationFrequency(o.deadline_rule)].push(o);
+  for (const o of obligations ?? []) {
+    const bucket = o.trigger_type === "activity" ? "tourism" : obligationFrequency(o.deadline_rule);
+    grouped[bucket].push(o);
+  }
   for (const key of Object.keys(grouped)) {
     grouped[key].sort((a, b) => obligationSortKey(a.deadline_rule) - obligationSortKey(b.deadline_rule));
   }

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Органайзер</title>
+<style>
+  :root {
+    --paper: #f5f6f1;
+    --ink: #20241d;
+    --muted: #6b6a58;
+    --line: #d9d6c8;
+    --accent: #2f6b4f;
+    --accent-ink: #1e4a35;
+    --accent-soft: #e1ebe3;
+    --amber: #93650f;
+    --amber-soft: #f2e6cc;
+    --red: #a33b2f;
+    --red-soft: #f5e3e0;
+    --card: #fbfbf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14160f; --ink: #e8e6d9; --muted: #a29d87; --line: #2d3123;
+      --accent: #74c39a; --accent-ink: #a8dcc0; --accent-soft: rgba(116,195,154,.14);
+      --amber: #e0b563; --amber-soft: rgba(224,181,99,.14);
+      --red: #e2897c; --red-soft: rgba(226,137,124,.14);
+      --card: #1b1e15;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+  }
+  header.top h1 { font-size: 1.3rem; margin: 0; }
+  header.top .who { font-size: .85rem; color: var(--muted); }
+  button {
+    font: inherit; cursor: pointer; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); border-radius: 4px; padding: 6px 12px;
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  /* --- login --- */
+  #login-view { max-width: 360px; margin: 80px auto; }
+  #login-view h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  #login-view p.lede { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: .92rem; }
+  #login-view label { display: block; font-size: .82rem; color: var(--muted); margin: 12px 0 4px; }
+  #login-view input {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--card); color: var(--ink); font: inherit;
+  }
+  #login-view button { width: 100%; margin-top: 18px; padding: 9px; }
+  #login-error { color: var(--red); font-size: .85rem; margin-top: 10px; min-height: 1.2em; }
+
+  /* --- tabs --- */
+  nav.tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+  nav.tabs button.tab { background: none; border: none; padding: 6px 4px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; }
+  nav.tabs button.tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* --- table --- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 640px; }
+  thead th {
+    text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line);
+  }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.due { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.due.overdue { color: var(--red); font-weight: 600; }
+  .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+  .pill-waiting { background: var(--amber-soft); color: var(--amber); }
+  .pill-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
+  .pill-submitted { background: var(--accent-soft); color: var(--accent-ink); }
+  .pill-completed { background: var(--line); color: var(--muted); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .loading { padding: 30px; text-align: center; color: var(--muted); }
+  .banner { padding: 10px 14px; border-radius: 4px; font-size: .85rem; margin-bottom: 14px; }
+  .banner.err { background: var(--red-soft); color: var(--red); }
+  .banner.ok { background: var(--accent-soft); color: var(--accent-ink); }
+</style>
+</head>
+<body>
+
+  <div id="login-view">
+    <h1>Органайзер</h1>
+    <p class="lede">Мехов Консулт — проследяване на нормативни срокове</p>
+    <form id="login-form">
+      <label for="email">Имейл</label>
+      <input id="email" type="email" autocomplete="username" required />
+      <label for="password">Парола</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button class="primary" type="submit">Вход</button>
+      <div id="login-error"></div>
+    </form>
+  </div>
+
+  <div id="app-view" class="wrap" style="display:none">
+    <header class="top">
+      <h1>Органайзер</h1>
+      <div>
+        <span class="who" id="who-label"></span>
+        <button id="logout-btn" style="margin-left:10px">Изход</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="tasks">Задачи</button>
+      <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
+    </nav>
+
+    <div id="banner-area"></div>
+
+    <section id="tasks-panel">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Клиент</th><th>Задължение</th><th>Период</th><th>Срок</th><th>Статус</th><th>Отговорник</th><th></th></tr>
+          </thead>
+          <tbody id="tasks-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="clients-panel" style="display:none">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Публични стойности — предназначени да са в браузъра, защитата е
+// през RLS (SPEC.md §11), не през тайна на тези две.
+const SUPABASE_URL = "https://ekyvbmokklfyrjkshuuu.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_AqiAa92i6VGUuwwUGDE0pw_5tqr5ahB";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const STATUS_LABEL = {
+  waiting: "Чакаща", in_progress: "В процес", submitted: "Подадена", completed: "Завършена",
+};
+const NEXT_STATUS = { waiting: "in_progress", in_progress: "submitted", submitted: "completed" };
+const NEXT_LABEL = { waiting: "Започни", in_progress: "Маркирай подадена", submitted: "Завърши" };
+
+let myProfile = null;
+let usersById = {}; // id -> full_name (само за admin изгледа)
+
+const loginView = document.getElementById("login-view");
+const appView = document.getElementById("app-view");
+const loginForm = document.getElementById("login-form");
+const loginError = document.getElementById("login-error");
+const whoLabel = document.getElementById("who-label");
+const bannerArea = document.getElementById("banner-area");
+
+function showBanner(msg, kind = "err") {
+  bannerArea.innerHTML = `<div class="banner ${kind}">${msg}</div>`;
+  if (kind === "ok") setTimeout(() => (bannerArea.innerHTML = ""), 3500);
+}
+
+function todayISO() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
+}
+
+// ---------------- Auth ----------------
+
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  loginError.textContent = "";
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) loginError.textContent = "Грешен имейл или парола.";
+});
+
+document.getElementById("logout-btn").addEventListener("click", async () => {
+  await supabase.auth.signOut();
+});
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  if (session) enterApp(); else showLogin();
+});
+
+function showLogin() {
+  loginView.style.display = "block";
+  appView.style.display = "none";
+  myProfile = null;
+}
+
+async function enterApp() {
+  loginView.style.display = "none";
+  appView.style.display = "block";
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: profile, error } = await supabase
+    .from("profiles").select("id, full_name, role").eq("id", user.id).single();
+  if (error) { showBanner("Не успях да заредя профила: " + error.message); return; }
+  myProfile = profile;
+
+  whoLabel.textContent = `${profile.full_name} · ${profile.role === "admin" ? "admin" : "счетоводител"}`;
+  document.getElementById("clients-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+
+  if (profile.role === "admin") {
+    const { data: profs } = await supabase.from("profiles").select("id, full_name");
+    usersById = Object.fromEntries((profs ?? []).map((p) => [p.id, p.full_name]));
+  } else {
+    usersById = { [profile.id]: profile.full_name };
+  }
+
+  loadTasks();
+}
+
+// ---------------- Tabs ----------------
+
+document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav.tabs .tab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const tab = btn.dataset.tab;
+    document.getElementById("tasks-panel").style.display = tab === "tasks" ? "" : "none";
+    document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
+    if (tab === "clients") loadClients();
+  });
+});
+
+// ---------------- Задачи ----------------
+
+async function loadTasks() {
+  const body = document.getElementById("tasks-body");
+  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(`
+      id, period_label, due_date, status, assigned_user_id,
+      clients ( name ),
+      obligation_types ( name )
+    `)
+    .order("due_date", { ascending: true });
+
+  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма задачи (все още).</td></tr>`; return; }
+
+  const today = todayISO();
+  body.innerHTML = "";
+  for (const t of data) {
+    const tr = document.createElement("tr");
+    const overdue = t.due_date < today && t.status !== "completed";
+    const nextStatus = NEXT_STATUS[t.status];
+    tr.innerHTML = `
+      <td>${t.clients?.name ?? "?"}</td>
+      <td>${t.obligation_types?.name ?? "?"}</td>
+      <td>${t.period_label}</td>
+      <td class="due ${overdue ? "overdue" : ""}">${t.due_date}</td>
+      <td><span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span></td>
+      <td>${usersById[t.assigned_user_id] ?? "—"}</td>
+      <td class="row-actions">
+        ${nextStatus ? `<button data-id="${t.id}" data-next="${nextStatus}" class="advance-btn">${NEXT_LABEL[t.status]}</button>` : ""}
+      </td>
+    `;
+    body.appendChild(tr);
+  }
+
+  body.querySelectorAll(".advance-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const id = btn.dataset.id;
+      const next = btn.dataset.next;
+      const patch = { status: next };
+      if (next === "completed") { patch.completed_at = new Date().toISOString(); patch.completed_by = myProfile.id; }
+      const { error } = await supabase.from("tasks").update(patch).eq("id", id);
+      if (error) { showBanner("Грешка при промяна: " + error.message); btn.disabled = false; return; }
+      showBanner("Обновено.", "ok");
+      loadTasks();
+    });
+  });
+}
+
+// ---------------- Клиенти (admin) ----------------
+
+async function loadClients() {
+  const body = document.getElementById("clients-body");
+  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name, eik_egn, type, active, responsible_user_id")
+    .order("name");
+
+  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма клиенти още.</td></tr>`; return; }
+
+  body.innerHTML = "";
+  for (const c of data) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${c.name}</td>
+      <td>${c.eik_egn}</td>
+      <td>${c.type === "legal_entity" ? "ЮЛ" : "ФЛ"}</td>
+      <td>${usersById[c.responsible_user_id] ?? "—"}</td>
+      <td>${c.active ? "да" : "не"}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+// ---------------- Старт ----------------
+
+supabase.auth.getSession().then(({ data: { session } }) => {
+  if (session) enterApp(); else showLogin();
+});
+</script>
+</body>
+</html>

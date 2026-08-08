@@ -1082,6 +1082,29 @@ function obligationFrequency(rule) {
   }
 }
 
+// Ключ за подредба по крайна дата за подаване (в рамките на честотна
+// група) — не изчислява реалния срок (той минава през holidays/
+// пренасяне при почивен ден в generate-tasks), само доближение за
+// визуален ред: месечните — по ден от месеца, годишните — по
+// месец+ден в календара, тримесечните — по деня от q1 (представителен).
+function obligationSortKey(rule) {
+  switch (rule?.type) {
+    case "day_of_next_month":
+      return rule.day ?? 99;
+    case "fixed_date":
+      return (rule.month ?? 13) * 100 + (rule.day ?? 32);
+    case "quarter_end_plus": {
+      const day = Number(String(rule.q1 ?? "99-99").split("-")[1]);
+      return Number.isNaN(day) ? 99 : day;
+    }
+    case "monthly_advance_zkpo_schedule":
+    case "quarterly_advance_zkpo_schedule":
+      return 15; // променлив график в самия месец — няма фиксиран ден
+    default: // before_activity_start, manual — няма календарен смисъл
+      return 999;
+  }
+}
+
 const editClientBackdrop = document.getElementById("edit-client-backdrop");
 
 document.getElementById("close-edit-client-btn").addEventListener("click", closeClientEdit);
@@ -1224,6 +1247,9 @@ async function toggleClientSettings(tr) {
   ];
   const grouped = Object.fromEntries(FREQUENCY_GROUPS.map((g) => [g.key, []]));
   for (const o of obligations ?? []) grouped[obligationFrequency(o.deadline_rule)].push(o);
+  for (const key of Object.keys(grouped)) {
+    grouped[key].sort((a, b) => obligationSortKey(a.deadline_rule) - obligationSortKey(b.deadline_rule));
+  }
 
   settingsDiv.innerHTML = FREQUENCY_GROUPS
     .filter((g) => grouped[g.key].length > 0)

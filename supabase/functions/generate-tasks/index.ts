@@ -86,7 +86,7 @@ type Period = {
   dueDateRaw: string; // преди пренасяне при почивен ден
 };
 
-function periodsForRule(
+export function periodsForRule(
   rule: { type: string; day?: number; month?: number },
   today: { y: number; m: number; d: number },
 ): Period[] {
@@ -159,7 +159,14 @@ function periodsForRule(
 
 const JOB_NAME = "daily_task_generation";
 
-Deno.serve(async (_req: Request) => {
+// import.meta.main е true само когато Deno изпълнява ТОЗИ файл пряко
+// (production) — не и когато тестов файл го импортира само за да
+// ползва export-натите чисти функции по-горе.
+if (import.meta.main) {
+  Deno.serve(handler);
+}
+
+async function handler(_req: Request): Promise<Response> {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -278,4 +285,4 @@ Deno.serve(async (_req: Request) => {
       headers: { "Content-Type": "application/json" },
     });
   }
-});
+}

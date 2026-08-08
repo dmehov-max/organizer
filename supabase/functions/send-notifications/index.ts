@@ -32,7 +32,7 @@ const SOFIA_TZ = "Europe/Sofia";
 // Дата помощни функции (нарочно дублирани от generate-tasks)
 // ---------------------------------------------------------------
 
-function sofiaToday(): { y: number; m: number; d: number } {
+export function sofiaToday(): { y: number; m: number; d: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: SOFIA_TZ,
     year: "numeric",
@@ -42,26 +42,26 @@ function sofiaToday(): { y: number; m: number; d: number } {
   const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
   return { y: get("year"), m: get("month"), d: get("day") };
 }
-function pad(n: number): string {
+export function pad(n: number): string {
   return n.toString().padStart(2, "0");
 }
-function toISODate(y: number, m: number, d: number): string {
+export function toISODate(y: number, m: number, d: number): string {
   return `${y.toString().padStart(4, "0")}-${pad(m)}-${pad(d)}`;
 }
-function parseISO(iso: string): { y: number; m: number; d: number } {
+export function parseISO(iso: string): { y: number; m: number; d: number } {
   const [y, m, d] = iso.split("-").map(Number);
   return { y, m, d };
 }
-function weekday(y: number, m: number, d: number): number {
+export function weekday(y: number, m: number, d: number): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
-function isBusinessDay(y: number, m: number, d: number, holidays: Set<string>): boolean {
+export function isBusinessDay(y: number, m: number, d: number, holidays: Set<string>): boolean {
   const wd = weekday(y, m, d);
   return wd !== 0 && wd !== 6 && !holidays.has(toISODate(y, m, d));
 }
 /** Брой работни дни от `fromISO` до `toISO` (изключва fromISO,
  * включва toISO); 0 при съвпадение, отрицателно ако toISO е в миналото. */
-function businessDaysBetween(fromISO: string, toISO: string, holidays: Set<string>): number {
+export function businessDaysBetween(fromISO: string, toISO: string, holidays: Set<string>): number {
   if (fromISO === toISO) return 0;
   const sign = toISO > fromISO ? 1 : -1;
   let { y, m, d } = parseISO(fromISO);
@@ -114,7 +114,14 @@ function bucket(bundles: Bundles, userId: string) {
 
 const JOB_NAME = "daily_notifications";
 
-Deno.serve(async (_req: Request) => {
+// import.meta.main е true само когато Deno изпълнява ТОЗИ файл пряко
+// (production) — не и когато тестов файл го импортира само за да
+// ползва export-натите чисти функции по-горе.
+if (import.meta.main) {
+  Deno.serve(handler);
+}
+
+async function handler(_req: Request): Promise<Response> {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -308,4 +315,4 @@ Deno.serve(async (_req: Request) => {
       headers: { "Content-Type": "application/json" },
     });
   }
-});
+}

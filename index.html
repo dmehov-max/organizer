@@ -475,7 +475,12 @@ async function toggleDetail(tr, task) {
       const file = input.files[0];
       if (!file) { showBanner("Избери файл първо."); return; }
       uploadBtn.disabled = true;
-      const path = `${task.id}/${Date.now()}_${file.name}`;
+      // Supabase Storage не приема кирилица/интервали/специални
+      // знаци в ключа на обекта — пазим оригиналното име само в
+      // самия файл (браузърът го праща отделно), не в пътя.
+      const extMatch = file.name.match(/\.[a-zA-Z0-9]+$/);
+      const ext = extMatch ? extMatch[0] : "";
+      const path = `${task.id}/${Date.now()}${ext}`;
       const { error: upErr } = await supabase.storage.from("attachments").upload(path, file);
       if (upErr) { showBanner("Грешка при качване: " + upErr.message); uploadBtn.disabled = false; return; }
       const { data: newAttachment, error: insErr } = await supabase.from("attachments").insert({

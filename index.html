@@ -89,8 +89,6 @@
   }
   tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tbody tr:last-child td { border-bottom: none; }
-  tr.task-row { cursor: pointer; }
-  tr.task-row:hover { background: var(--accent-soft); }
   .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
   .pill-waiting { background: var(--amber-soft); color: var(--amber); }
   .pill-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
@@ -242,8 +240,8 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
-          <tbody id="clients-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
+          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th><th></th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -853,7 +851,7 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
 
 async function loadClients() {
   const body = document.getElementById("clients-body");
-  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
   populateResponsibleSelect();
 
   const { data, error } = await supabase
@@ -861,13 +859,12 @@ async function loadClients() {
     .select("id, name, eik_egn, type, active, responsible_user_id")
     .order("name");
 
-  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма клиенти още.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
 
   body.innerHTML = "";
   for (const c of data) {
     const tr = document.createElement("tr");
-    tr.className = "task-row"; // преизползваме hover/cursor стила
     tr.dataset.id = c.id;
     const masked = maskEgn(c.eik_egn, c.type);
     const isMasked = masked !== c.eik_egn;
@@ -880,6 +877,7 @@ async function loadClients() {
       <td>${c.type === "legal_entity" ? "ЮЛ" : "ФЛ"}</td>
       <td>${usersById[c.responsible_user_id] ?? "—"}</td>
       <td>${c.active ? "да" : "не"}</td>
+      <td><button class="small edit-client-btn" data-id="${c.id}">Редакция</button></td>
     `;
     body.appendChild(tr);
   }
@@ -894,11 +892,11 @@ async function loadClients() {
     });
   });
 
-  body.querySelectorAll("tr.task-row").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
-      if (e.target.closest("a") || e.target.closest("button")) return;
-      toggleClientSettings(tr);
-    });
+  // Досието се отваря само изрично, през бутона — не при клик върху
+  // произволно място на реда (по изрична заявка, за да не се отваря
+  // случайно при клик).
+  body.querySelectorAll(".edit-client-btn").forEach((btn) => {
+    btn.addEventListener("click", () => toggleClientSettings(btn.closest("tr")));
   });
 }
 
@@ -912,10 +910,14 @@ async function toggleClientSettings(tr) {
   const clientId = tr.dataset.id;
   const detailTr = document.createElement("tr");
   detailTr.className = "detail-row";
-  detailTr.innerHTML = `<td colspan="5"><div class="detail-grid">
+  detailTr.innerHTML = `<td colspan="6"><div class="detail-grid">
     <div class="detail-block">
       <h4>Досие (СОЛ / ТД / ГД)</h4>
       <div id="dossier-${clientId}">Зареждане…</div>
+      <div class="check-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <input type="checkbox" id="active-cb-${clientId}" class="active-cb" />
+        <label for="active-cb-${clientId}">Активен клиент</label>
+      </div>
     </div>
     <div class="detail-block">
       <h4>Настройки — кои задължения важат</h4>
@@ -951,6 +953,26 @@ async function toggleClientSettings(tr) {
       cb.disabled = false;
       showBanner("Досието е обновено.", "ok");
     });
+  });
+
+  // "Активен" живее на самия клиент (clients.active), не е dossier
+  // флаг нито obligation-setting — по изрична заявка е свое поле в
+  // досие-блока, не сред чеклиста със задължения.
+  const { data: clientRow } = await supabase.from("clients").select("active").eq("id", clientId).single();
+  const activeCb = document.getElementById(`active-cb-${clientId}`);
+  activeCb.checked = !!clientRow?.active;
+  activeCb.addEventListener("change", async () => {
+    activeCb.disabled = true;
+    const { error } = await supabase.from("clients").update({ active: activeCb.checked }).eq("id", clientId);
+    if (error) {
+      showBanner("Грешка: " + error.message);
+      activeCb.checked = !activeCb.checked;
+    } else {
+      logAudit("client", clientId, "active_changed", { active: activeCb.checked });
+      tr.children[4].textContent = activeCb.checked ? "да" : "не"; // без loadClients() — да не се затвори панелът
+      showBanner("Обновено.", "ok");
+    }
+    activeCb.disabled = false;
   });
 
   // Настройки — всички текущи видове задължения + кои са включени

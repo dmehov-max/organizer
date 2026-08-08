@@ -105,16 +105,26 @@
   .banner.err { background: var(--red-soft); color: var(--red); }
   .banner.ok { background: var(--accent-soft); color: var(--accent-ink); }
 
-  /* --- форма за нов клиент --- */
-  .new-client-form {
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-    padding: 16px 18px; margin-bottom: 16px;
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;
-    align-items: end;
+  /* --- клиенти: лента с бутон + модал за нов клиент --- */
+  .clients-toolbar { display: flex; justify-content: flex-end; margin-bottom: 14px; }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(20,20,15,.4);
+    display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
   }
-  .new-client-form input, .new-client-form select { width: 100%; }
-  .new-client-form button { grid-column: 1 / -1; justify-self: start; }
-  @media (min-width: 700px) { .new-client-form button { grid-column: auto; } }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    width: 100%; max-width: 420px; padding: 22px 24px;
+    box-shadow: 0 24px 70px -24px rgba(0,0,0,.45);
+  }
+  .modal h2 { font-size: 1.05rem; margin: 0 0 18px; }
+  /* полетата подредени като таблица — етикет отляво, стойност
+     отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
+  .form-table { display: flex; flex-direction: column; gap: 13px; }
+  .form-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
+  .form-row label { margin: 0; }
+  .form-row input, .form-row select { width: 100%; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
@@ -227,17 +237,9 @@
     </section>
 
     <section id="clients-panel" style="display:none">
-      <form id="new-client-form" class="new-client-form">
-        <div class="field"><label for="nc-name">Име</label><input id="nc-name" required /></div>
-        <div class="field"><label for="nc-eik">ЕИК/ЕГН</label><input id="nc-eik" required /></div>
-        <div class="field"><label for="nc-type">Тип</label>
-          <select id="nc-type">
-            <option value="legal_entity">Юридическо лице</option>
-            <option value="individual">Физическо лице</option>
-          </select></div>
-        <div class="field"><label for="nc-responsible">Отговорник</label><select id="nc-responsible"></select></div>
-        <button class="primary" type="submit">+ Нов клиент</button>
-      </form>
+      <div class="clients-toolbar">
+        <button class="primary" id="open-new-client-btn">+ Нов клиент</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
@@ -245,6 +247,28 @@
         </table>
       </div>
     </section>
+  </div>
+
+  <div class="modal-backdrop" id="new-client-backdrop">
+    <div class="modal">
+      <h2>Нов клиент</h2>
+      <form id="new-client-form">
+        <div class="form-table">
+          <div class="form-row"><label for="nc-name">Име</label><input id="nc-name" required /></div>
+          <div class="form-row"><label for="nc-eik">ЕИК/ЕГН</label><input id="nc-eik" required /></div>
+          <div class="form-row"><label for="nc-type">Тип</label>
+            <select id="nc-type">
+              <option value="legal_entity">Юридическо лице</option>
+              <option value="individual">Физическо лице</option>
+            </select></div>
+          <div class="form-row"><label for="nc-responsible">Отговорник</label><select id="nc-responsible"></select></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancel-new-client-btn">Отказ</button>
+          <button class="primary" type="submit">Създай</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <button id="ai-toggle" title="Помощник">?</button>
@@ -792,6 +816,24 @@ function populateResponsibleSelect() {
   sel.innerHTML = Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
 }
 
+const newClientBackdrop = document.getElementById("new-client-backdrop");
+
+function openNewClientModal() {
+  populateResponsibleSelect();
+  newClientBackdrop.classList.add("open");
+  document.getElementById("nc-name").focus();
+}
+function closeNewClientModal() {
+  newClientBackdrop.classList.remove("open");
+  document.getElementById("new-client-form").reset();
+}
+
+document.getElementById("open-new-client-btn").addEventListener("click", openNewClientModal);
+document.getElementById("cancel-new-client-btn").addEventListener("click", closeNewClientModal);
+// Клик върху тъмния фон (не самия модал) затваря — стандартно поведение.
+newClientBackdrop.addEventListener("click", (e) => { if (e.target === newClientBackdrop) closeNewClientModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && newClientBackdrop.classList.contains("open")) closeNewClientModal(); });
+
 document.getElementById("new-client-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = document.getElementById("nc-name").value.trim();
@@ -804,7 +846,7 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   }).select("id").single();
   if (error) { showBanner("Грешка при създаване: " + error.message); return; }
   logAudit("client", newClient.id, "created", { name });
-  document.getElementById("new-client-form").reset();
+  closeNewClientModal();
   showBanner("Клиентът е създаден.", "ok");
   loadClients();
 });

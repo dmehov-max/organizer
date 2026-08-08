@@ -263,6 +263,14 @@
             </select></div>
           <div class="form-row"><label for="nc-responsible">Отговорник</label><select id="nc-responsible"></select></div>
         </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)">
+          <label style="margin-bottom:8px">Досие и регистрации — задълженията се включват автоматично според тях</label>
+          <div id="nc-dossier-checks"></div>
+          <div class="check-row">
+            <input type="checkbox" id="nc-vat" />
+            <label for="nc-vat">Регистрация по ДДС</label>
+          </div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="cancel-new-client-btn">Отказ</button>
           <button class="primary" type="submit">Създай</button>
@@ -280,7 +288,8 @@
         <div class="form-table">
           <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
           <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label><input id="ec-eik" /></div>
-          <div class="form-row"><label for="ec-address">Адрес на управление</label><input id="ec-address" /></div>
+          <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
+          <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
         </div>
         <div style="margin-top:12px"><button class="small primary" id="save-company-data-btn">Запази</button></div>
       </div>
@@ -734,8 +743,13 @@ async function toggleDetail(card, task) {
       <h4>Потвърждение</h4>
       <div id="attachments-list-${task.id}">Зареждане…</div>
       ${task.obligation_types?.requires_confirmation_upload !== false ? `
+        <select id="kind-select-${task.id}" style="margin-top:8px">
+          <option value="confirmation">Потвърждение</option>
+          <option value="payment_proof">Доказателство за плащане</option>
+          <option value="other">Друго</option>
+        </select>
         <input type="file" id="file-input-${task.id}" accept="application/pdf,image/*" style="margin-top:8px" />
-        <button class="small" id="upload-btn-${task.id}" style="margin-top:6px">Качи потвърждение</button>
+        <button class="small" id="upload-btn-${task.id}" style="margin-top:6px">Качи файл</button>
       ` : ""}
     </div>
     <div class="detail-block">
@@ -770,6 +784,7 @@ async function toggleDetail(card, task) {
   if (uploadBtn) {
     uploadBtn.addEventListener("click", async () => {
       const input = document.getElementById(`file-input-${task.id}`);
+      const kind = document.getElementById(`kind-select-${task.id}`).value;
       const file = input.files[0];
       if (!file) { showBanner("Избери файл първо."); return; }
       uploadBtn.disabled = true;
@@ -782,24 +797,27 @@ async function toggleDetail(card, task) {
       const { error: upErr } = await supabase.storage.from("attachments").upload(path, file);
       if (upErr) { showBanner("Грешка при качване: " + upErr.message); uploadBtn.disabled = false; return; }
       const { data: newAttachment, error: insErr } = await supabase.from("attachments").insert({
-        task_id: task.id, kind: "confirmation", storage_path: path, uploaded_by: myProfile.id,
+        task_id: task.id, kind, storage_path: path, uploaded_by: myProfile.id,
       }).select("id").single();
       if (insErr) { showBanner("Файлът се качи, но записът в базата гръмна: " + insErr.message); return; }
-      // Прикачено потвърждение → статус "Подадена" (ако още не е по-напред)
-      if (task.status === "waiting" || task.status === "in_progress") {
+      // Статус "Подадена" и PDF-разпознаване важат само за
+      // потвърждения — доказателство за плащане/"друго" не значат,
+      // че задачата е подадена в НАП, и не съдържат маркери за
+      // разпознаване.
+      if (kind === "confirmation" && (task.status === "waiting" || task.status === "in_progress")) {
         await supabase.from("tasks").update({ status: "submitted" }).eq("id", task.id);
       }
-      logAudit("attachment", task.id, "confirmation_uploaded", { path });
+      logAudit("attachment", task.id, "attachment_uploaded", { path, kind });
 
       // Извикваме разпознаването директно оттук (вместо Database
       // Webhook — блокиран от бъг в Supabase, липсваща схема
       // "supabase_functions"). Не чакаме резултата за UI-то, но
       // грешката вече не се поглъща тихо (както по-рано — заради
       // това не забелязахме липсващите CORS хедъри при първия тест).
-      fetch(RECOGNIZE_URL, {
+      if (kind === "confirmation") fetch(RECOGNIZE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ record: { id: newAttachment.id, task_id: task.id, storage_path: path, kind: "confirmation" } }),
+        body: JSON.stringify({ record: { id: newAttachment.id, task_id: task.id, storage_path: path, kind } }),
       })
         .then((r) => r.ok ? null : r.text().then((t) => console.error("recognize-confirmation:", r.status, t)))
         .catch((e) => console.error("recognize-confirmation fetch failed:", e));
@@ -856,8 +874,23 @@ function populateResponsibleSelect() {
 
 const newClientBackdrop = document.getElementById("new-client-backdrop");
 
+// Кешира ID-то на регистрационния тип "vat" — четем го еднократно,
+// ползва се и при създаване, и при редакция на клиент.
+let vatRegistrationTypeIdCache; // undefined = още не е питано; null = липсва в базата
+async function getVatRegistrationTypeId() {
+  if (vatRegistrationTypeIdCache !== undefined) return vatRegistrationTypeIdCache;
+  const { data } = await supabase.from("registration_types").select("id").eq("code", "vat").maybeSingle();
+  vatRegistrationTypeIdCache = data?.id ?? null;
+  return vatRegistrationTypeIdCache;
+}
+
 function openNewClientModal() {
   populateResponsibleSelect();
+  // Досие-чекбоксовете още при създаване — задълженията се включват
+  // автоматично според тях (SPEC.md §3), не се тика ръчно всяко.
+  document.getElementById("nc-dossier-checks").innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
+    <div class="check-row"><input type="checkbox" id="nc-flag-${code}" class="nc-flag" data-flag="${code}" /><label for="nc-flag-${code}">${label}</label></div>
+  `).join("");
   newClientBackdrop.classList.add("open");
   document.getElementById("nc-name").focus();
 }
@@ -884,6 +917,20 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   }).select("id").single();
   if (error) { showBanner("Грешка при създаване: " + error.message); return; }
   logAudit("client", newClient.id, "created", { name });
+
+  const today = todayISO();
+  const checkedFlags = [...document.querySelectorAll(".nc-flag:checked")].map((cb) => cb.dataset.flag);
+  for (const flag of checkedFlags) {
+    await supabase.from("client_dossier_flags").insert({ client_id: newClient.id, flag, started_on: today });
+  }
+  if (document.getElementById("nc-vat").checked) {
+    const vatTypeId = await getVatRegistrationTypeId();
+    if (vatTypeId) await supabase.from("client_registrations").insert({ client_id: newClient.id, registration_type_id: vatTypeId, started_on: today });
+  }
+  // Тригерите в базата (0009_smart_obligation_sync.sql) вече
+  // включиха автоматично съответните задължения въз основа на
+  // горните флагове/регистрация + "важи за всички ЮЛ".
+
   closeNewClientModal();
   showBanner("Клиентът е създаден.", "ok");
   loadClients();
@@ -940,7 +987,7 @@ async function loadClients() {
   });
 }
 
-const DOSSIER_FLAGS = { sol: "СОЛ", td: "ТД", gd: "ГД" };
+const DOSSIER_FLAGS = { sol: "СОЛ", td: "ТД", gd: "ГД", sol_personal_labor: "СОЛ с личен труд" };
 
 const editClientBackdrop = document.getElementById("edit-client-backdrop");
 
@@ -998,7 +1045,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address, active").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active").eq("id", clientId).single();
   const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
   activeCb.onchange = async () => {
@@ -1020,16 +1067,18 @@ async function toggleClientSettings(tr) {
   // да е маскирано за физически лица).
   document.getElementById("ec-name").value = clientRow?.name ?? "";
   document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
-  document.getElementById("ec-address").value = clientRow?.address ?? "";
+  document.getElementById("ec-city").value = clientRow?.address_city ?? "";
+  document.getElementById("ec-street").value = clientRow?.address_street ?? "";
   const saveBtn = document.getElementById("save-company-data-btn");
   saveBtn.onclick = async () => {
     const name = document.getElementById("ec-name").value.trim();
     const eik = document.getElementById("ec-eik").value.trim();
-    const address = document.getElementById("ec-address").value.trim();
+    const city = document.getElementById("ec-city").value.trim();
+    const street = document.getElementById("ec-street").value.trim();
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни."); return; }
     saveBtn.disabled = true;
     const { error } = await supabase.from("clients")
-      .update({ name, eik_egn: eik, address: address || null }).eq("id", clientId);
+      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null }).eq("id", clientId);
     saveBtn.disabled = false;
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
@@ -1042,24 +1091,24 @@ async function toggleClientSettings(tr) {
   // (client_registrations), но потребителски удобно е да се вижда
   // и превключва от същия модал.
   const vatCb = document.getElementById("vat-cb-panel");
-  const { data: vatType } = await supabase.from("registration_types").select("id").eq("code", "vat").maybeSingle();
-  if (!vatType) {
+  const vatTypeId = await getVatRegistrationTypeId();
+  if (!vatTypeId) {
     vatCb.disabled = true;
   } else {
     const { data: vatReg } = await supabase.from("client_registrations")
-      .select("id").eq("client_id", clientId).eq("registration_type_id", vatType.id).is("ended_on", null).maybeSingle();
+      .select("id").eq("client_id", clientId).eq("registration_type_id", vatTypeId).is("ended_on", null).maybeSingle();
     vatCb.disabled = false;
     vatCb.checked = !!vatReg;
     vatCb.onchange = async () => {
       vatCb.disabled = true;
       if (vatCb.checked) {
         await supabase.from("client_registrations").insert({
-          client_id: clientId, registration_type_id: vatType.id, started_on: todayISO(),
+          client_id: clientId, registration_type_id: vatTypeId, started_on: todayISO(),
         });
       } else {
         await supabase.from("client_registrations")
           .update({ ended_on: todayISO() })
-          .eq("client_id", clientId).eq("registration_type_id", vatType.id).is("ended_on", null);
+          .eq("client_id", clientId).eq("registration_type_id", vatTypeId).is("ended_on", null);
       }
       logAudit("client", clientId, "vat_registration_changed", { active: vatCb.checked });
       vatCb.disabled = false;

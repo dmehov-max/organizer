@@ -1,25 +1,43 @@
-# Supabase — схема
+# Supabase — схема и функции
 
-- `migrations/0001_init.sql` — начална схема: клиенти, регистрации,
-  дейности, досие, видове задължения, настройки на клиент, задачи,
-  прикачени файлове, плащания, одит лог, лог на известия. RLS е
-  включено навсякъде, но без политики (fail-closed) — политиките идват
-  в отделна миграция (Прогрес #9 — Сигурност).
-- `seed.sql` — попълва `registration_types`, `activity_types` и
-  `obligation_types` с целия каталог от `SPEC.md` §6.
+Проектът "organizer" вече е жив (EU регион, project ref
+`ekyvbmokklfyrjkshuuu`) — това по-долу е за справка/повторение, ако
+някога трябва да се пресъздаде от нулата.
 
-Виж `SPEC.md` в основната папка за пълния модел и обосновка.
+## Ред за прилагане (SQL Editor, по един файл)
 
-## Все още няма създаден Supabase проект
+1. `migrations/0001_init.sql` — начална схема: клиенти, регистрации,
+   дейности, досие (вече с история по период), видове задължения
+   (версионирани), настройки на клиент, задачи (разширен жизнен цикъл
+   — корекции, удължаване, "не се дължи"), прикачени файлове, плащания,
+   празници, одит лог, лог на известия, heartbeat. RLS включено
+   навсякъде (fail-closed).
+2. `migrations/0002_rls_policies.sql` — политиките (admin вижда/пипа
+   всичко, счетоводител — само своите клиенти/задачи).
+3. `seed.sql` — попълва `registration_types`, `activity_types`,
+   `obligation_types` (целия каталог от `SPEC.md` §6) + стартов
+   празничен календар за 2026 (**провери срещу решение на МС**).
+4. `migrations/0003_storage.sql` — частен bucket `attachments` + RLS.
+5. `migrations/0004_audit_self_insert.sql` — позволява на всеки
+   потребител да пише в `audit_log` само свои действия.
 
-Схемата е готова, но не е приложена никъде — нямаме още провизиран
-Supabase проект. Стъпки, когато решиш:
+## Edge Functions (Edge Functions → Create a new function, paste, Deploy)
 
-1. Създаваш проект на [supabase.com](https://supabase.com) (безплатен
-   tier е достатъчен за начало).
-2. `supabase link --project-ref <ref>` (или през SQL editor в
-   таблото — copy/paste на файловете, ако не искаш CLI).
-3. `supabase db push` (прилага `migrations/`), после ръчно изпълняваш
-   `seed.sql` веднъж.
-4. Пазим `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
-   в `.env` (никога в git) — виж `SPEC.md` §11.
+Supabase дава им случайно име, ако не смениш полето — записвай си
+реалното кръстено име, кодът не го знае предварително:
+
+- `functions/generate-tasks/` — дневен cron, генерира задачи (и вече
+  и записи за плащане, ако задължението го изисква). На живо като
+  **`clever-responder`**.
+- `functions/send-notifications/` — дневен cron, сборни имейли по
+  служител + admin дайджест. Нужен secret `RESEND_API_KEY` (+
+  опционално `RESEND_FROM`). На живо като **`hyper-service`**.
+- `functions/recognize-confirmation/` — чете текста на прикачени PDF
+  потвърждения. ⚠️ Използва библиотека (`unpdf`), непотвърдена на
+  живо — виж README в папката ѝ. Все още недеплойната.
+- `functions/ai-helper/` — AI помощник, JWT-scoped контекст (не
+  service_role). Нужен secret `ANTHROPIC_API_KEY`. Все още
+  недеплойната.
+
+Виж `SPEC.md` в основната папка за пълния модел и обосновка, и
+`.env` (локално, gitignored) за текущите ключове.

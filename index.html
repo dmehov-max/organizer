@@ -122,6 +122,9 @@
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
   .form-table { display: flex; flex-direction: column; gap: 13px; }
   .form-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
+  .form-row-pair { display: flex; gap: 16px; }
+  .form-row-pair .form-row { flex: 1; min-width: 0; }
+  @media (max-width: 480px) { .form-row-pair { flex-direction: column; gap: 13px; } }
   .form-row label { margin: 0; }
   .form-row input, .form-row select { width: 100%; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -289,8 +292,10 @@
       <div class="detail-block" style="margin-bottom:20px">
         <h4>Данни на фирмата</h4>
         <div class="form-table">
-          <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
-          <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label><input id="ec-eik" /></div>
+          <div class="form-row-pair">
+            <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
+            <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label><input id="ec-eik" /></div>
+          </div>
           <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
           <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
         </div>

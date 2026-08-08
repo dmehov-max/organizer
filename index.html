@@ -40,7 +40,6 @@
     display: flex; align-items: center; justify-content: space-between;
     padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
   }
-  header.top h1 { font-size: 1.3rem; margin: 0; }
   header.top .who { font-size: .85rem; color: var(--muted); }
   button {
     font: inherit; cursor: pointer; border: 1px solid var(--line);
@@ -51,15 +50,28 @@
   button:disabled { opacity: .5; cursor: default; }
   a.linklike { color: var(--accent-ink); cursor: pointer; font-size: .8rem; background: none; border: none; padding: 0; text-decoration: underline; }
 
+  /* --- единна стилистика за всички полета/лейбъли/чекбоксове в
+     приложението (форма за нов клиент, MFA кодове, чекбокс списъци
+     в детайлите на клиент — всички ползват тези правила, вместо
+     разпилени inline стилове с различни размери/радиуси). --- */
+  h1 { font-size: 1.35rem; margin: 0; }
+  input, select {
+    font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--ink);
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+  label { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+  .field { display: flex; flex-direction: column; }
+  .hint { font-size: .82rem; color: var(--muted); }
+  .check-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: .85rem; }
+  .check-row label { display: inline; font-size: inherit; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--ink); margin-bottom: 0; }
+
   /* --- login --- */
   #login-view { max-width: 360px; margin: 80px auto; }
-  #login-view h1 { font-size: 1.4rem; margin-bottom: 4px; }
-  #login-view p.lede { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: .92rem; }
-  #login-view label { display: block; font-size: .82rem; color: var(--muted); margin: 12px 0 4px; }
-  #login-view input {
-    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
-    background: var(--card); color: var(--ink); font: inherit;
-  }
+  #login-view p.lede { color: var(--muted); margin: 4px 0 24px; font-size: .92rem; }
+  #login-view .field { margin-top: 12px; }
+  #login-view input { width: 100%; }
   #login-view button { width: 100%; margin-top: 18px; padding: 9px; }
   #login-error { color: var(--red); font-size: .85rem; margin-top: 10px; min-height: 1.2em; }
 
@@ -92,6 +104,17 @@
   .banner { padding: 10px 14px; border-radius: 8px; font-size: .85rem; margin-bottom: 14px; }
   .banner.err { background: var(--red-soft); color: var(--red); }
   .banner.ok { background: var(--accent-soft); color: var(--accent-ink); }
+
+  /* --- форма за нов клиент --- */
+  .new-client-form {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 16px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;
+    align-items: end;
+  }
+  .new-client-form input, .new-client-form select { width: 100%; }
+  .new-client-form button { grid-column: 1 / -1; justify-self: start; }
+  @media (min-width: 700px) { .new-client-form button { grid-column: auto; } }
 
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
@@ -157,10 +180,10 @@
     <h1>Органайзер</h1>
     <p class="lede">Мехов Консулт — проследяване на нормативни срокове</p>
     <form id="login-form">
-      <label for="email">Имейл</label>
-      <input id="email" type="email" autocomplete="username" required />
-      <label for="password">Парола</label>
-      <input id="password" type="password" autocomplete="current-password" required />
+      <div class="field"><label for="email">Имейл</label>
+        <input id="email" type="email" autocomplete="username" required /></div>
+      <div class="field"><label for="password">Парола</label>
+        <input id="password" type="password" autocomplete="current-password" required /></div>
       <button class="primary" type="submit">Вход</button>
       <div id="login-error"></div>
     </form>
@@ -171,7 +194,7 @@
     <p class="lede">Отвори приложението за удостоверяване (Google Authenticator и подобни) и въведи 6-цифрения код.</p>
     <form id="mfa-challenge-form">
       <input id="mfa-challenge-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456"
-        style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;letter-spacing:.3em;text-align:center" required />
+        style="width:100%;letter-spacing:.3em;text-align:center" required />
       <button class="primary" type="submit" style="width:100%;margin-top:14px;padding:9px">Потвърди</button>
       <div id="mfa-challenge-error" style="color:var(--red);font-size:.85rem;margin-top:10px;min-height:1.2em"></div>
     </form>
@@ -204,18 +227,15 @@
     </section>
 
     <section id="clients-panel" style="display:none">
-      <form id="new-client-form" class="table-wrap" style="padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end">
-        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Име</label>
-          <input id="nc-name" required style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" /></div>
-        <div><label style="display:block;font-size:.78rem;color:var(--muted)">ЕИК/ЕГН</label>
-          <input id="nc-eik" required style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" /></div>
-        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Тип</label>
-          <select id="nc-type" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)">
+      <form id="new-client-form" class="new-client-form">
+        <div class="field"><label for="nc-name">Име</label><input id="nc-name" required /></div>
+        <div class="field"><label for="nc-eik">ЕИК/ЕГН</label><input id="nc-eik" required /></div>
+        <div class="field"><label for="nc-type">Тип</label>
+          <select id="nc-type">
             <option value="legal_entity">Юридическо лице</option>
             <option value="individual">Физическо лице</option>
           </select></div>
-        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Отговорник</label>
-          <select id="nc-responsible" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)"></select></div>
+        <div class="field"><label for="nc-responsible">Отговорник</label><select id="nc-responsible"></select></div>
         <button class="primary" type="submit">+ Нов клиент</button>
       </form>
       <div class="table-wrap">
@@ -437,11 +457,10 @@ async function refreshMfaSetupStatus(opts) {
     if (error) { showBanner("Грешка: " + error.message); return; }
     const area = document.getElementById("mfa-enroll-area");
     area.innerHTML = `
-      <p style="font-size:.85rem;color:var(--muted)">Сканирай с приложение за удостоверяване (Google Authenticator и подобни):</p>
+      <p class="hint">Сканирай с приложение за удостоверяване (Google Authenticator и подобни):</p>
       <div style="max-width:200px">${data.totp.qr_code}</div>
-      <p style="font-size:.78rem;color:var(--muted)">Или въведи ръчно: <code>${escapeHtml(data.totp.secret)}</code></p>
-      <input id="mfa-enroll-code" inputmode="numeric" maxlength="6" placeholder="123456"
-        style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);letter-spacing:.2em" />
+      <p class="hint">Или въведи ръчно: <code>${escapeHtml(data.totp.secret)}</code></p>
+      <input id="mfa-enroll-code" inputmode="numeric" maxlength="6" placeholder="123456" style="letter-spacing:.2em" />
       <button class="small primary" id="mfa-confirm-btn">Потвърди</button>
     `;
     document.getElementById("mfa-confirm-btn").addEventListener("click", async () => {
@@ -671,14 +690,14 @@ async function toggleDetail(card, task) {
     .eq("task_id", task.id).order("uploaded_at", { ascending: false });
   const attList = document.getElementById(`attachments-list-${task.id}`);
   if (!attachments || attachments.length === 0) {
-    attList.innerHTML = `<div style="color:var(--muted)">Няма качени файлове.</div>`;
+    attList.innerHTML = `<div class="hint">Няма качени файлове.</div>`;
   } else {
     attList.innerHTML = attachments.map((a) => `
       <div class="attachment-item">
         ${a.kind === "confirmation" ? "Потвърждение" : a.kind === "payment_proof" ? "Доказателство за плащане" : "Друго"}
         — ${new Date(a.uploaded_at).toLocaleString("bg-BG")}
         ${a.recognized_marker ? `<span class="pill pill-${a.recognized_marker}" style="margin-left:6px">${a.recognized_marker === "accepted" ? "разпознато: прието" : "разпознато: отказано"}</span>` : ""}
-        ${a.recognized_reference_number ? `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">Вх. № ${escapeHtml(a.recognized_reference_number)}${a.recognized_client_name ? " · " + escapeHtml(a.recognized_client_name) : ""}</div>` : ""}
+        ${a.recognized_reference_number ? `<div class="hint" style="margin-top:2px">Вх. № ${escapeHtml(a.recognized_reference_number)}${a.recognized_client_name ? " · " + escapeHtml(a.recognized_client_name) : ""}</div>` : ""}
         ${a.duplicate_of_attachment_id ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ дублиран входящ номер — вече качен друг път</span></div>` : ""}
         ${a.client_name_mismatch ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ документът е за друга фирма — провери!</span></div>` : ""}
       </div>
@@ -734,7 +753,7 @@ async function toggleDetail(card, task) {
     .eq("task_id", task.id).maybeSingle();
   const payInfo = document.getElementById(`payment-info-${task.id}`);
   if (!payment) {
-    payInfo.innerHTML = `<div style="color:var(--muted)">Няма изискване за плащане по това задължение.</div>`;
+    payInfo.innerHTML = `<div class="hint">Няма изискване за плащане по това задължение.</div>`;
   } else {
     payInfo.innerHTML = `
       <div>Срок: <b>${payment.due_date}</b></div>
@@ -869,9 +888,10 @@ async function toggleClientSettings(tr) {
   const activeFlags = new Set((flags ?? []).map((f) => f.flag));
   const dossierDiv = document.getElementById(`dossier-${clientId}`);
   dossierDiv.innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
-    <label style="display:block;margin-bottom:6px">
-      <input type="checkbox" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} /> ${label}
-    </label>
+    <div class="check-row">
+      <input type="checkbox" id="dossier-cb-${clientId}-${code}" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} />
+      <label for="dossier-cb-${clientId}-${code}">${label}</label>
+    </div>
   `).join("");
   dossierDiv.querySelectorAll(".dossier-cb").forEach((cb) => {
     cb.addEventListener("change", async () => {
@@ -900,9 +920,10 @@ async function toggleClientSettings(tr) {
 
   const settingsDiv = document.getElementById(`settings-${clientId}`);
   settingsDiv.innerHTML = (obligations ?? []).map((o) => `
-    <label style="display:block;margin-bottom:5px;font-size:.82rem">
-      <input type="checkbox" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} /> ${escapeHtml(o.name)}
-    </label>
+    <div class="check-row">
+      <input type="checkbox" id="obl-cb-${clientId}-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
+      <label for="obl-cb-${clientId}-${o.id}">${escapeHtml(o.name)}</label>
+    </div>
   `).join("");
   settingsDiv.querySelectorAll(".obligation-cb").forEach((cb) => {
     cb.addEventListener("change", async () => {

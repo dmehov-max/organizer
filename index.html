@@ -59,6 +59,7 @@
     font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
     background: var(--card); color: var(--ink);
   }
+  #nc-name, #ec-name { font-size: 1.15rem; font-weight: 600; padding: 10px 12px; }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
   label { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
@@ -338,7 +339,6 @@
           <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
           <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
         </div>
-        <div style="margin-top:12px"><button class="small primary" id="save-company-data-btn">Запази</button></div>
       </div>
 
       <div class="detail-grid">
@@ -1158,7 +1158,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type").eq("id", clientId).single();
   const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
   activeCb.onchange = async () => {
@@ -1182,23 +1182,33 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
   document.getElementById("ec-city").value = clientRow?.address_city ?? "";
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
-  const saveBtn = document.getElementById("save-company-data-btn");
-  saveBtn.onclick = async () => {
+
+  // Автоматичен запис при напускане на поле (blur) — без бутон
+  // "Запази" (махнат по изрична заявка). Обновяваме реда в таблицата
+  // директно, вместо да презареждаме целия списък при всяко poле.
+  const saveCompanyData = async () => {
     const name = document.getElementById("ec-name").value.trim();
     const eik = document.getElementById("ec-eik").value.trim();
     const city = document.getElementById("ec-city").value.trim();
     const street = document.getElementById("ec-street").value.trim();
-    if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни."); return; }
-    saveBtn.disabled = true;
+    if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
     const { error } = await supabase.from("clients")
       .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null }).eq("id", clientId);
-    saveBtn.disabled = false;
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
-    loadClients(); // презарежда реда с правилно маскиране на ЕГН по тип
-    showBanner("Данните са запазени.", "ok");
+    tr.children[0].textContent = name;
+    const egnCell = tr.children[1].querySelector(".egn-cell");
+    if (egnCell) egnCell.textContent = maskEgn(eik, clientRow?.type);
   };
+  // .onblur (не addEventListener) — тази функция се вика при всяко
+  // отваряне на модала; addEventListener трупаше по един listener на
+  // всяко отваряне (и щеше да пише в СТАРИЯ clientId при следващо
+  // blur). Присвояването сменя предишния, само последният важи —
+  // същият похват, ползван по-долу за vatCb.onchange/activeCb.onchange.
+  ["ec-name", "ec-eik", "ec-city", "ec-street"].forEach((id) => {
+    document.getElementById(id).onblur = saveCompanyData;
+  });
 
   // Регистрация по ДДС — отделна от досие-флаговете таблица
   // (client_registrations), но потребителски удобно е да се вижда

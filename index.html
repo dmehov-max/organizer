@@ -238,6 +238,16 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Одит лог (SPEC.md §11) — всеки пише само своите действия, RLS
+// (0004_audit_self_insert.sql) го налага и на ниво база, не само тук.
+async function logAudit(entityType, entityId, action, details) {
+  if (!myProfile) return;
+  await supabase.from("audit_log").insert({
+    entity_type: entityType, entity_id: entityId, action,
+    actor_user_id: myProfile.id, details: details ?? null,
+  });
+}
+
 // ---------------- Auth ----------------
 
 loginForm.addEventListener("submit", async (e) => {
@@ -371,6 +381,7 @@ async function loadTasks() {
       btn.disabled = true;
       const { error } = await supabase.from("tasks").update({ status: btn.dataset.next }).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка при промяна: " + error.message); btn.disabled = false; return; }
+      logAudit("task", btn.dataset.id, "status_changed", { to: btn.dataset.next });
       showBanner("Обновено.", "ok");
       loadTasks();
     });
@@ -386,6 +397,7 @@ async function loadTasks() {
         status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
       }).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
+      logAudit("task", btn.dataset.id, "status_changed", { to: "completed" });
       showBanner("Задачата е завършена.", "ok");
       loadTasks();
     });
@@ -457,6 +469,7 @@ async function toggleDetail(tr, task) {
       if (task.status === "waiting" || task.status === "in_progress") {
         await supabase.from("tasks").update({ status: "submitted" }).eq("id", task.id);
       }
+      logAudit("attachment", task.id, "confirmation_uploaded", { path });
       showBanner("Потвърждението е качено.", "ok");
       loadTasks();
     });
@@ -486,6 +499,7 @@ async function toggleDetail(tr, task) {
         const { error } = await supabase.from("task_payments")
           .update({ paid: true, paid_at: new Date().toISOString() }).eq("id", payment.id);
         if (error) { showBanner("Грешка: " + error.message); markBtn.disabled = false; return; }
+        logAudit("task_payment", payment.id, "marked_paid", { task_id: task.id });
         showBanner("Маркирано като платено.", "ok");
         toggleDetail(tr, task); toggleDetail(tr, task); // презареди детайла
       });
@@ -513,10 +527,11 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   const type = document.getElementById("nc-type").value;
   const responsible = document.getElementById("nc-responsible").value;
   if (!name || !eik) return;
-  const { error } = await supabase.from("clients").insert({
+  const { data: newClient, error } = await supabase.from("clients").insert({
     name, eik_egn: eik, type, responsible_user_id: responsible || null,
-  });
+  }).select("id").single();
   if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+  logAudit("client", newClient.id, "created", { name });
   document.getElementById("new-client-form").reset();
   showBanner("Клиентът е създаден.", "ok");
   loadClients();
@@ -617,6 +632,7 @@ async function toggleClientSettings(tr) {
           .update({ ended_on: todayISO() })
           .eq("client_id", clientId).eq("flag", cb.dataset.flag).is("ended_on", null);
       }
+      logAudit("client", clientId, "dossier_flag_changed", { flag: cb.dataset.flag, active: cb.checked });
       cb.disabled = false;
       showBanner("Досието е обновено.", "ok");
     });
@@ -643,6 +659,7 @@ async function toggleClientSettings(tr) {
         enabled: cb.checked, overridden_by_admin: true,
       }, { onConflict: "client_id,obligation_type_id" });
       if (error) showBanner("Грешка: " + error.message);
+      else logAudit("client", clientId, "obligation_setting_changed", { obligation_type_id: cb.dataset.oid, enabled: cb.checked });
       cb.disabled = false;
     });
   });

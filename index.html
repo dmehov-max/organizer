@@ -6,26 +6,28 @@
 <title>Органайзер</title>
 <style>
   :root {
-    --paper: #f5f6f1;
-    --ink: #20241d;
-    --muted: #6b6a58;
-    --line: #d9d6c8;
-    --accent: #2f6b4f;
-    --accent-ink: #1e4a35;
-    --accent-soft: #e1ebe3;
-    --amber: #93650f;
-    --amber-soft: #f2e6cc;
-    --red: #a33b2f;
-    --red-soft: #f5e3e0;
-    --card: #fbfbf8;
+    /* "Мека зона" — топла неутрална основа, приглушен тийл акцент,
+       по-заоблени форми (виж дизайн preview от 2026-08-09). */
+    --paper: #f4f1e9;
+    --ink: #2b2a25;
+    --muted: #8b8878;
+    --line: #e7e2d3;
+    --accent: #3f7d82;
+    --accent-ink: #2c5f63;
+    --accent-soft: #dfeaea;
+    --amber: #b1832f;
+    --amber-soft: #f4e8d2;
+    --red: #bd5142;
+    --red-soft: #f6e2dd;
+    --card: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --paper: #14160f; --ink: #e8e6d9; --muted: #a29d87; --line: #2d3123;
-      --accent: #74c39a; --accent-ink: #a8dcc0; --accent-soft: rgba(116,195,154,.14);
+      --paper: #17190f; --ink: #e7e4d8; --muted: #948f7a; --line: #2c2f26;
+      --accent: #6fb0b3; --accent-ink: #9ccdcf; --accent-soft: rgba(111,176,179,.14);
       --amber: #e0b563; --amber-soft: rgba(224,181,99,.14);
       --red: #e2897c; --red-soft: rgba(226,137,124,.14);
-      --card: #1b1e15;
+      --card: #1d201a;
     }
   }
   * { box-sizing: border-box; }
@@ -42,10 +44,10 @@
   header.top .who { font-size: .85rem; color: var(--muted); }
   button {
     font: inherit; cursor: pointer; border: 1px solid var(--line);
-    background: var(--card); color: var(--ink); border-radius: 4px; padding: 6px 12px;
+    background: var(--card); color: var(--ink); border-radius: 8px; padding: 6px 13px;
   }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  button.small { padding: 3px 8px; font-size: .8rem; }
+  button.small { padding: 4px 10px; font-size: .8rem; border-radius: 999px; }
   button:disabled { opacity: .5; cursor: default; }
   a.linklike { color: var(--accent-ink); cursor: pointer; font-size: .8rem; background: none; border: none; padding: 0; text-decoration: underline; }
 
@@ -55,7 +57,7 @@
   #login-view p.lede { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: .92rem; }
   #login-view label { display: block; font-size: .82rem; color: var(--muted); margin: 12px 0 4px; }
   #login-view input {
-    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px;
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
     background: var(--card); color: var(--ink); font: inherit;
   }
   #login-view button { width: 100%; margin-top: 18px; padding: 9px; }
@@ -66,8 +68,8 @@
   nav.tabs button.tab { background: none; border: none; padding: 6px 4px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; }
   nav.tabs button.tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 
-  /* --- table --- */
-  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+  /* --- table (клиенти, форми) --- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 640px; }
   thead th {
     text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
@@ -77,8 +79,6 @@
   tbody tr:last-child td { border-bottom: none; }
   tr.task-row { cursor: pointer; }
   tr.task-row:hover { background: var(--accent-soft); }
-  td.due { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.due.overdue { color: var(--red); font-weight: 600; }
   .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
   .pill-waiting { background: var(--amber-soft); color: var(--amber); }
   .pill-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
@@ -89,11 +89,42 @@
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .empty { padding: 30px; text-align: center; color: var(--muted); }
   .loading { padding: 30px; text-align: center; color: var(--muted); }
-  .banner { padding: 10px 14px; border-radius: 4px; font-size: .85rem; margin-bottom: 14px; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: .85rem; margin-bottom: 14px; }
   .banner.err { background: var(--red-soft); color: var(--red); }
   .banner.ok { background: var(--accent-soft); color: var(--accent-ink); }
 
-  /* --- детайли на задача --- */
+  /* --- KPI лента (задачи) --- */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
+  .kpi .n { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; color: var(--ink); }
+  .kpi .n.warn { color: var(--red); }
+  .kpi .l { font-size: .72rem; color: var(--muted); margin-top: 5px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+
+  /* --- задачи: карти вместо таблица --- */
+  .cards { display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    display: flex; align-items: center; gap: 16px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+    cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card:hover { border-color: var(--accent); }
+  .datebox {
+    flex: 0 0 auto; width: 54px; text-align: center; border-radius: 10px; padding: 7px 4px;
+    background: var(--accent-soft); color: var(--accent-ink);
+  }
+  .card.overdue .datebox { background: var(--red-soft); color: var(--red); }
+  .datebox .d { font-size: 1.15rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .datebox .m { font-size: .62rem; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+  .card .info { flex: 1 1 auto; min-width: 0; }
+  .card .info .client { font-weight: 700; font-size: .93rem; }
+  .card .info .obl { font-size: .82rem; color: var(--muted); margin-top: 1px; }
+  .card .info .ref { font-size: .74rem; color: var(--muted); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .card .meta { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .card .assignee { font-size: .76rem; color: var(--muted); }
+
+  /* --- детайли на задача/клиент --- */
+  .detail-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; }
   tr.detail-row td { background: var(--paper); padding: 16px 20px; }
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: .85rem; }
   .detail-block h4 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
@@ -140,7 +171,7 @@
     <p class="lede">Отвори приложението за удостоверяване (Google Authenticator и подобни) и въведи 6-цифрения код.</p>
     <form id="mfa-challenge-form">
       <input id="mfa-challenge-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456"
-        style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink);font:inherit;letter-spacing:.3em;text-align:center" required />
+        style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;letter-spacing:.3em;text-align:center" required />
       <button class="primary" type="submit" style="width:100%;margin-top:14px;padding:9px">Потвърди</button>
       <div id="mfa-challenge-error" style="color:var(--red);font-size:.85rem;margin-top:10px;min-height:1.2em"></div>
     </form>
@@ -168,29 +199,23 @@
     <div id="banner-area"></div>
 
     <section id="tasks-panel">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Клиент</th><th>Задължение</th><th>Период</th><th>Срок</th><th>Статус</th><th>Отговорник</th><th></th></tr>
-          </thead>
-          <tbody id="tasks-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
-        </table>
-      </div>
+      <div class="kpis" id="kpis"></div>
+      <div class="cards" id="tasks-body"><div class="loading">Зареждане…</div></div>
     </section>
 
     <section id="clients-panel" style="display:none">
       <form id="new-client-form" class="table-wrap" style="padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end">
         <div><label style="display:block;font-size:.78rem;color:var(--muted)">Име</label>
-          <input id="nc-name" required style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)" /></div>
+          <input id="nc-name" required style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" /></div>
         <div><label style="display:block;font-size:.78rem;color:var(--muted)">ЕИК/ЕГН</label>
-          <input id="nc-eik" required style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)" /></div>
+          <input id="nc-eik" required style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" /></div>
         <div><label style="display:block;font-size:.78rem;color:var(--muted)">Тип</label>
-          <select id="nc-type" style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)">
+          <select id="nc-type" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)">
             <option value="legal_entity">Юридическо лице</option>
             <option value="individual">Физическо лице</option>
           </select></div>
         <div><label style="display:block;font-size:.78rem;color:var(--muted)">Отговорник</label>
-          <select id="nc-responsible" style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)"></select></div>
+          <select id="nc-responsible" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)"></select></div>
         <button class="primary" type="submit">+ Нов клиент</button>
       </form>
       <div class="table-wrap">
@@ -416,7 +441,7 @@ async function refreshMfaSetupStatus(opts) {
       <div style="max-width:200px">${data.totp.qr_code}</div>
       <p style="font-size:.78rem;color:var(--muted)">Или въведи ръчно: <code>${escapeHtml(data.totp.secret)}</code></p>
       <input id="mfa-enroll-code" inputmode="numeric" maxlength="6" placeholder="123456"
-        style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink);letter-spacing:.2em" />
+        style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);letter-spacing:.2em" />
       <button class="small primary" id="mfa-confirm-btn">Потвърди</button>
     `;
     document.getElementById("mfa-confirm-btn").addEventListener("click", async () => {
@@ -462,9 +487,21 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
 
 // ---------------- Задачи ----------------
 
+const MONTH_ABBR = ["яну", "фев", "мар", "апр", "май", "юни", "юли", "авг", "сеп", "окт", "ное", "дек"];
+function formatDueBox(iso) {
+  const [, m, d] = iso.split("-").map(Number);
+  return { day: String(d).padStart(2, "0"), month: MONTH_ABBR[m - 1] };
+}
+function addDaysISO(iso, days) {
+  const dt = new Date(iso + "T00:00:00Z");
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
 async function loadTasks() {
   const body = document.getElementById("tasks-body");
-  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+  const kpis = document.getElementById("kpis");
+  body.innerHTML = `<div class="loading">Зареждане…</div>`;
 
   const { data, error } = await supabase
     .from("tasks")
@@ -476,47 +513,68 @@ async function loadTasks() {
     `)
     .order("due_date", { ascending: true });
 
-  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма задачи (все още).</td></tr>`; return; }
+  if (error) { body.innerHTML = `<div class="empty">Грешка: ${error.message}</div>`; kpis.innerHTML = ""; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<div class="empty">Няма задачи (все още).</div>`; kpis.innerHTML = ""; return; }
 
   const today = todayISO();
-  body.innerHTML = "";
-  for (const t of data) {
-    const tr = document.createElement("tr");
-    tr.className = "task-row";
-    tr.dataset.id = t.id;
-    const overdue = t.due_date < today && t.status !== "completed";
-    const nextStatus = NEXT_STATUS[t.status];
+  const soon = addDaysISO(today, 5);
+
+  // За всяка задача — последното качено потвърждение (по дата), за
+  // да вземем от него вх. номер и предупрежденията за проверка.
+  const withLatest = data.map((t) => {
     const confirmations = (t.attachments ?? [])
       .filter((a) => a.kind === "confirmation")
       .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
-    const latestConfirmation = confirmations[0] ?? null;
-    tr.innerHTML = `
-      <td>${escapeHtml(t.clients?.name ?? "?")}</td>
-      <td>${escapeHtml(t.obligation_types?.name ?? "?")}</td>
-      <td>${t.period_label}</td>
-      <td class="due ${overdue ? "overdue" : ""}">${t.due_date}</td>
-      <td>
+    return { t, latest: confirmations[0] ?? null };
+  });
+
+  const overdueCount = withLatest.filter(({ t }) => t.due_date < today && t.status !== "completed").length;
+  const soonCount = withLatest.filter(({ t }) => t.due_date >= today && t.due_date <= soon && t.status !== "completed").length;
+  const reviewCount = withLatest.filter(({ latest }) => latest?.client_name_mismatch || latest?.duplicate_of_attachment_id).length;
+  const { count: activeClients } = await supabase.from("clients").select("id", { count: "exact", head: true }).eq("active", true);
+
+  kpis.innerHTML = `
+    <div class="kpi"><div class="n ${overdueCount > 0 ? "warn" : ""}">${overdueCount}</div><div class="l">Просрочени</div></div>
+    <div class="kpi"><div class="n">${soonCount}</div><div class="l">До 5 дни</div></div>
+    <div class="kpi"><div class="n ${reviewCount > 0 ? "warn" : ""}">${reviewCount}</div><div class="l">Изискват проверка</div></div>
+    <div class="kpi"><div class="n">${activeClients ?? "—"}</div><div class="l">Активни клиенти</div></div>
+  `;
+
+  body.innerHTML = "";
+  for (const { t, latest } of withLatest) {
+    const card = document.createElement("div");
+    const overdue = t.due_date < today && t.status !== "completed";
+    card.className = "card" + (overdue ? " overdue" : "");
+    card.dataset.id = t.id;
+    const nextStatus = NEXT_STATUS[t.status];
+    const { day, month } = formatDueBox(t.due_date);
+    card.innerHTML = `
+      <div class="datebox"><div class="d">${day}</div><div class="m">${month}</div></div>
+      <div class="info">
+        <div class="client">${escapeHtml(t.clients?.name ?? "?")}</div>
+        <div class="obl">${escapeHtml(t.obligation_types?.name ?? "?")} · ${escapeHtml(t.period_label)}</div>
+        ${latest?.recognized_reference_number ? `<div class="ref">Вх. № ${escapeHtml(latest.recognized_reference_number)}</div>` : ""}
+      </div>
+      <div class="meta">
         <span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span>
         ${t.confirmation_status === "accepted" ? '<span class="pill pill-accepted">потвърд. прието</span>' : ""}
         ${t.confirmation_status === "rejected" ? '<span class="pill pill-rejected">потвърд. отказано</span>' : ""}
-        ${latestConfirmation?.recognized_reference_number ? `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">Вх. № ${escapeHtml(latestConfirmation.recognized_reference_number)}</div>` : ""}
-        ${latestConfirmation?.client_name_mismatch ? `<div style="margin-top:2px"><span class="pill pill-rejected">⚠ друга фирма</span></div>` : ""}
-        ${latestConfirmation?.duplicate_of_attachment_id ? `<div style="margin-top:2px"><span class="pill pill-rejected">⚠ дублиран №</span></div>` : ""}
-      </td>
-      <td>${usersById[t.assigned_user_id] ?? "—"}</td>
-      <td class="row-actions">
-        ${nextStatus ? `<button data-id="${t.id}" data-next="${nextStatus}" class="advance-btn small">${NEXT_LABEL[t.status]}</button>` : ""}
-        ${t.status !== "completed" ? `<button data-id="${t.id}" class="complete-btn small">Завърши</button>` : ""}
-      </td>
+        ${latest?.client_name_mismatch ? '<span class="pill pill-rejected">⚠ друга фирма</span>' : ""}
+        ${latest?.duplicate_of_attachment_id ? '<span class="pill pill-rejected">⚠ дублиран №</span>' : ""}
+        <span class="assignee">${usersById[t.assigned_user_id] ?? "—"}</span>
+        <div class="row-actions">
+          ${nextStatus ? `<button data-id="${t.id}" data-next="${nextStatus}" class="advance-btn small">${NEXT_LABEL[t.status]}</button>` : ""}
+          ${t.status !== "completed" ? `<button data-id="${t.id}" class="complete-btn small">Завърши</button>` : ""}
+        </div>
+      </div>
     `;
-    body.appendChild(tr);
+    body.appendChild(card);
   }
 
-  body.querySelectorAll(".task-row").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
+  body.querySelectorAll(".card").forEach((card) => {
+    card.addEventListener("click", (e) => {
       if (e.target.closest("button")) return; // не разгъвай при клик върху бутон
-      toggleDetail(tr, data.find((t) => t.id === tr.dataset.id));
+      toggleDetail(card, data.find((t) => t.id === card.dataset.id));
     });
   });
 
@@ -578,19 +636,19 @@ async function loadTasks() {
 
 // ---------------- Детайли на задача: потвърждение + плащане ----------------
 
-async function toggleDetail(tr, task) {
-  const existing = tr.nextElementSibling;
-  if (existing && existing.classList.contains("detail-row")) {
+async function toggleDetail(card, task) {
+  const existing = card.nextElementSibling;
+  if (existing && existing.classList.contains("detail-panel")) {
     existing.remove();
     openTaskId = null;
     return;
   }
-  document.querySelectorAll(".detail-row").forEach((r) => r.remove());
+  document.querySelectorAll(".detail-panel").forEach((r) => r.remove());
   openTaskId = task.id;
 
-  const detailTr = document.createElement("tr");
-  detailTr.className = "detail-row";
-  detailTr.innerHTML = `<td colspan="7"><div class="detail-grid">
+  const detailDiv = document.createElement("div");
+  detailDiv.className = "detail-panel";
+  detailDiv.innerHTML = `<div class="detail-grid">
     <div class="detail-block">
       <h4>Потвърждение</h4>
       <div id="attachments-list-${task.id}">Зареждане…</div>
@@ -603,8 +661,8 @@ async function toggleDetail(tr, task) {
       <h4>Плащане</h4>
       <div id="payment-info-${task.id}">Зареждане…</div>
     </div>
-  </div></td>`;
-  tr.after(detailTr);
+  </div>`;
+  card.after(detailDiv);
 
   // Прикачени файлове
   const { data: attachments } = await supabase
@@ -696,7 +754,7 @@ async function toggleDetail(tr, task) {
         if (error) { showBanner("Грешка: " + error.message); markBtn.disabled = false; return; }
         logAudit("task_payment", payment.id, "marked_paid", { task_id: task.id });
         showBanner("Маркирано като платено.", "ok");
-        toggleDetail(tr, task); toggleDetail(tr, task); // презареди детайла
+        toggleDetail(card, task); toggleDetail(card, task); // презареди детайла
       });
     }
   }

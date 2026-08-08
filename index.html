@@ -163,6 +163,20 @@
     </section>
 
     <section id="clients-panel" style="display:none">
+      <form id="new-client-form" class="table-wrap" style="padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end">
+        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Име</label>
+          <input id="nc-name" required style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)" /></div>
+        <div><label style="display:block;font-size:.78rem;color:var(--muted)">ЕИК/ЕГН</label>
+          <input id="nc-eik" required style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)" /></div>
+        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Тип</label>
+          <select id="nc-type" style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)">
+            <option value="legal_entity">Юридическо лице</option>
+            <option value="individual">Физическо лице</option>
+          </select></div>
+        <div><label style="display:block;font-size:.78rem;color:var(--muted)">Отговорник</label>
+          <select id="nc-responsible" style="padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink)"></select></div>
+        <button class="primary" type="submit">+ Нов клиент</button>
+      </form>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
@@ -486,9 +500,32 @@ function maskEgn(egn, type) {
   return "•".repeat(egn.length - 4) + egn.slice(-4);
 }
 
+function populateResponsibleSelect() {
+  const sel = document.getElementById("nc-responsible");
+  if (!sel) return;
+  sel.innerHTML = Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
+}
+
+document.getElementById("new-client-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = document.getElementById("nc-name").value.trim();
+  const eik = document.getElementById("nc-eik").value.trim();
+  const type = document.getElementById("nc-type").value;
+  const responsible = document.getElementById("nc-responsible").value;
+  if (!name || !eik) return;
+  const { error } = await supabase.from("clients").insert({
+    name, eik_egn: eik, type, responsible_user_id: responsible || null,
+  });
+  if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+  document.getElementById("new-client-form").reset();
+  showBanner("Клиентът е създаден.", "ok");
+  loadClients();
+});
+
 async function loadClients() {
   const body = document.getElementById("clients-body");
   body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+  populateResponsibleSelect();
 
   const { data, error } = await supabase
     .from("clients")
@@ -501,6 +538,8 @@ async function loadClients() {
   body.innerHTML = "";
   for (const c of data) {
     const tr = document.createElement("tr");
+    tr.className = "task-row"; // преизползваме hover/cursor стила
+    tr.dataset.id = c.id;
     const masked = maskEgn(c.eik_egn, c.type);
     const isMasked = masked !== c.eik_egn;
     tr.innerHTML = `
@@ -517,11 +556,94 @@ async function loadClients() {
   }
 
   body.querySelectorAll(".reveal-egn").forEach((a) => {
-    a.addEventListener("click", () => {
+    a.addEventListener("click", (e) => {
+      e.stopPropagation();
       const cell = a.previousElementSibling;
       const showing = a.textContent === "скрий";
       cell.textContent = showing ? maskEgn(a.dataset.full, "individual") : a.dataset.full;
       a.textContent = showing ? "покажи" : "скрий";
+    });
+  });
+
+  body.querySelectorAll("tr.task-row").forEach((tr) => {
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("a") || e.target.closest("button")) return;
+      toggleClientSettings(tr);
+    });
+  });
+}
+
+const DOSSIER_FLAGS = { sol: "СОЛ", td: "ТД", gd: "ГД" };
+
+async function toggleClientSettings(tr) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains("detail-row")) { existing.remove(); return; }
+  document.querySelectorAll(".detail-row").forEach((r) => r.remove());
+
+  const clientId = tr.dataset.id;
+  const detailTr = document.createElement("tr");
+  detailTr.className = "detail-row";
+  detailTr.innerHTML = `<td colspan="5"><div class="detail-grid">
+    <div class="detail-block">
+      <h4>Досие (СОЛ / ТД / ГД)</h4>
+      <div id="dossier-${clientId}">Зареждане…</div>
+    </div>
+    <div class="detail-block">
+      <h4>Настройки — кои задължения важат</h4>
+      <div id="settings-${clientId}" style="max-height:260px;overflow-y:auto">Зареждане…</div>
+    </div>
+  </div></td>`;
+  tr.after(detailTr);
+
+  // Досие — текущо активни флагове (ended_on is null)
+  const { data: flags } = await supabase
+    .from("client_dossier_flags").select("id, flag").eq("client_id", clientId).is("ended_on", null);
+  const activeFlags = new Set((flags ?? []).map((f) => f.flag));
+  const dossierDiv = document.getElementById(`dossier-${clientId}`);
+  dossierDiv.innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
+    <label style="display:block;margin-bottom:6px">
+      <input type="checkbox" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} /> ${label}
+    </label>
+  `).join("");
+  dossierDiv.querySelectorAll(".dossier-cb").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      if (cb.checked) {
+        await supabase.from("client_dossier_flags").insert({
+          client_id: clientId, flag: cb.dataset.flag, started_on: todayISO(),
+        });
+      } else {
+        await supabase.from("client_dossier_flags")
+          .update({ ended_on: todayISO() })
+          .eq("client_id", clientId).eq("flag", cb.dataset.flag).is("ended_on", null);
+      }
+      cb.disabled = false;
+      showBanner("Досието е обновено.", "ok");
+    });
+  });
+
+  // Настройки — всички текущи видове задължения + кои са включени
+  const { data: obligations } = await supabase
+    .from("obligation_types").select("id, code, name").is("valid_to", null).order("name");
+  const { data: settings } = await supabase
+    .from("client_obligation_settings").select("obligation_type_id, enabled").eq("client_id", clientId);
+  const enabledIds = new Set((settings ?? []).filter((s) => s.enabled).map((s) => s.obligation_type_id));
+
+  const settingsDiv = document.getElementById(`settings-${clientId}`);
+  settingsDiv.innerHTML = (obligations ?? []).map((o) => `
+    <label style="display:block;margin-bottom:5px;font-size:.82rem">
+      <input type="checkbox" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} /> ${escapeHtml(o.name)}
+    </label>
+  `).join("");
+  settingsDiv.querySelectorAll(".obligation-cb").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      const { error } = await supabase.from("client_obligation_settings").upsert({
+        client_id: clientId, obligation_type_id: cb.dataset.oid,
+        enabled: cb.checked, overridden_by_admin: true,
+      }, { onConflict: "client_id,obligation_type_id" });
+      if (error) showBanner("Грешка: " + error.message);
+      cb.disabled = false;
     });
   });
 }
@@ -546,9 +668,13 @@ aiForm.addEventListener("submit", async (e) => {
   aiHistory.push({ role: "user", content: msg });
 
   try {
+    const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch(AI_HELPER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
       body: JSON.stringify({ message: msg, history: aiHistory.slice(0, -1) }),
     });
     const data = await res.json();

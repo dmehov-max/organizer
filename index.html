@@ -472,7 +472,7 @@ async function loadTasks() {
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
       clients ( name ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
-      attachments ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
+      attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
     `)
     .order("due_date", { ascending: true });
 

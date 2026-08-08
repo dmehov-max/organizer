@@ -110,7 +110,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = await res.json();
-    const reply = data.content?.[0]?.text ?? "(няма отговор)";
+    // Не вземаме сляпо content[0] — при разширено "мислене" моделът
+    // може да сложи thinking блок преди текстовия, и content[0].text
+    // излиза undefined (тихо, без грешка от Anthropic) → търсим
+    // изрично първия истински текстов блок. Открито на живо: реален
+    // въпрос от потребителя връщаше "(няма отговор)" три пъти подред,
+    // въпреки че API извикването самото минаваше успешно (res.ok).
+    const textBlock = Array.isArray(data.content) ? data.content.find((b: any) => b?.type === "text") : null;
+    const reply = textBlock?.text ?? "(няма отговор)";
 
     return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

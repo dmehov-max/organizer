@@ -65,7 +65,7 @@
   .field { display: flex; flex-direction: column; }
   .hint { font-size: .82rem; color: var(--muted); }
   .check-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: .85rem; }
-  .check-row label { display: inline; font-size: inherit; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--ink); margin-bottom: 0; }
+  .check-row label:not(.switch) { display: inline; font-size: inherit; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--ink); margin-bottom: 0; }
 
   /* --- login --- */
   #login-view { max-width: 360px; margin: 80px auto; }
@@ -89,6 +89,8 @@
   }
   tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tbody tr:last-child td { border-bottom: none; }
+  tr.clickable-row { cursor: pointer; }
+  tr.clickable-row:hover { background: var(--accent-soft); }
   .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
   .pill-waiting { background: var(--amber-soft); color: var(--amber); }
   .pill-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
@@ -122,9 +124,30 @@
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
   .form-table { display: flex; flex-direction: column; gap: 13px; }
   .form-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
-  .form-row-pair { display: flex; gap: 16px; }
-  .form-row-pair .form-row { flex: 1; min-width: 0; }
+  .form-row-pair { display: flex; gap: 16px; align-items: start; }
+  .form-row-pair > * { flex: 1; min-width: 0; }
   @media (max-width: 480px) { .form-row-pair { flex-direction: column; gap: 13px; } }
+
+  /* --- ЕИК + ДДС, скачени в едно — регистрацията виси буквално "до
+     ЕИК-а" (потребителска забележка), с жив preview на ДДС номера. --- */
+  .eik-vat-block { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .eik-vat-block .form-row { grid-template-columns: 68px 1fr; }
+  .vat-toggle { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .vat-toggle-text { display: flex; flex-direction: column; gap: 2px; }
+  .vat-toggle-text label { margin: 0; text-transform: none; letter-spacing: normal; font-weight: 500; font-size: .85rem; color: var(--ink); }
+  .vat-preview { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .72rem; color: var(--accent-ink); font-variant-numeric: tabular-nums; min-height: 1.1em; }
+
+  /* --- превключвател вместо гол чекбокс, за досие/ДДС/активен --- */
+  .switch { position: relative; display: inline-block; width: 36px; height: 21px; flex: 0 0 auto; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch-track { position: absolute; inset: 0; background: var(--line); border-radius: 999px; cursor: pointer; transition: background .15s; }
+  .switch-track::before {
+    content: ""; position: absolute; width: 15px; height: 15px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3);
+  }
+  .switch input:checked + .switch-track { background: var(--accent); }
+  .switch input:checked + .switch-track::before { transform: translateX(15px); }
+  .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .form-row label { margin: 0; }
   .form-row input, .form-row select { width: 100%; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -248,8 +271,8 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th><th></th></tr></thead>
-          <tbody id="clients-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
+          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -261,7 +284,17 @@
       <form id="new-client-form">
         <div class="form-table">
           <div class="form-row"><label for="nc-name">Име</label><input id="nc-name" required /></div>
-          <div class="form-row"><label for="nc-eik">ЕИК/ЕГН</label><input id="nc-eik" required /></div>
+          <div class="eik-vat-block">
+            <div class="form-row"><label for="nc-eik">ЕИК/ЕГН</label>
+              <input id="nc-eik" required inputmode="numeric" maxlength="9" pattern="\d{9}" placeholder="123456789" /></div>
+            <div class="vat-toggle">
+              <label class="switch"><input type="checkbox" id="nc-vat" /><span class="switch-track"></span></label>
+              <div class="vat-toggle-text">
+                <label for="nc-vat">Регистрация по ДДС</label>
+                <span class="vat-preview" id="nc-vat-preview"></span>
+              </div>
+            </div>
+          </div>
           <div class="form-row"><label for="nc-type">Тип</label>
             <select id="nc-type">
               <option value="legal_entity">Юридическо лице</option>
@@ -270,12 +303,8 @@
           <div class="form-row"><label for="nc-responsible">Отговорник</label><select id="nc-responsible"></select></div>
         </div>
         <div style="margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)">
-          <label style="margin-bottom:8px">Досие и регистрации — задълженията се включват автоматично според тях</label>
+          <label style="margin-bottom:8px">Досие — задълженията се включват автоматично според него</label>
           <div id="nc-dossier-checks"></div>
-          <div class="check-row">
-            <input type="checkbox" id="nc-vat" />
-            <label for="nc-vat">Регистрация по ДДС</label>
-          </div>
         </div>
         <div class="modal-actions">
           <button type="button" id="cancel-new-client-btn">Отказ</button>
@@ -294,7 +323,17 @@
         <div class="form-table">
           <div class="form-row-pair">
             <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
-            <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label><input id="ec-eik" /></div>
+            <div class="eik-vat-block">
+              <div class="form-row"><label for="ec-eik">ЕИК/ЕГН</label>
+                <input id="ec-eik" inputmode="numeric" maxlength="9" pattern="\d{9}" placeholder="123456789" /></div>
+              <div class="vat-toggle">
+                <label class="switch"><input type="checkbox" id="vat-cb-panel" /><span class="switch-track"></span></label>
+                <div class="vat-toggle-text">
+                  <label for="vat-cb-panel">Регистрация по ДДС</label>
+                  <span class="vat-preview" id="ec-vat-preview"></span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
           <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
@@ -307,11 +346,7 @@
           <h4>Досие (СОЛ / ТД / ГД)</h4>
           <div id="dossier-panel">Зареждане…</div>
           <div class="check-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
-            <input type="checkbox" id="vat-cb-panel" />
-            <label for="vat-cb-panel">Регистрация по ДДС</label>
-          </div>
-          <div class="check-row">
-            <input type="checkbox" id="active-cb-panel" />
+            <label class="switch"><input type="checkbox" id="active-cb-panel" /><span class="switch-track"></span></label>
             <label for="active-cb-panel">Активен клиент</label>
           </div>
         </div>
@@ -377,6 +412,15 @@ function showBanner(msg, kind = "err") {
 
 function todayISO() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
+}
+
+// Генерира ред с превключвател (вместо гол чекбокс) — единен вид за
+// досие/ДДС/активен/чеклист със задължения навсякъде в приложението.
+function checkRowHtml(id, label, checked, extraAttrs = "") {
+  return `<div class="check-row">
+    <label class="switch"><input type="checkbox" id="${id}" ${checked ? "checked" : ""} ${extraAttrs}/><span class="switch-track"></span></label>
+    <label for="${id}">${label}</label>
+  </div>`;
 }
 
 function escapeHtml(s) {
@@ -892,19 +936,41 @@ async function getVatRegistrationTypeId() {
   return vatRegistrationTypeIdCache;
 }
 
+// Жив preview на ДДС номера (BG + ЕИК) до чекбокса "Регистрация по
+// ДДС" — веднага показва какво ще излезе, и предупреждава ако ЕИК-ът
+// не е точно 9 цифри (изискване, изрично посочено от Дойчин).
+function wireVatPreview(eikInputId, vatCbId, previewId) {
+  const eikInput = document.getElementById(eikInputId);
+  const vatCb = document.getElementById(vatCbId);
+  const preview = document.getElementById(previewId);
+  const update = () => {
+    const digits = eikInput.value.trim();
+    if (!vatCb.checked) { preview.textContent = ""; return; }
+    preview.textContent = /^\d{9}$/.test(digits)
+      ? `ДДС номер: BG${digits}`
+      : "ЕИК трябва да е точно 9 цифри за валиден ДДС номер";
+  };
+  eikInput.addEventListener("input", update);
+  vatCb.addEventListener("change", update);
+  return update; // за ръчно опресняване, когато стойностите се сетват програмно (не пали 'change')
+}
+wireVatPreview("nc-eik", "nc-vat", "nc-vat-preview");
+const updateEcVatPreview = wireVatPreview("ec-eik", "vat-cb-panel", "ec-vat-preview");
+
 function openNewClientModal() {
   populateResponsibleSelect();
   // Досие-чекбоксовете още при създаване — задълженията се включват
   // автоматично според тях (SPEC.md §3), не се тика ръчно всяко.
-  document.getElementById("nc-dossier-checks").innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
-    <div class="check-row"><input type="checkbox" id="nc-flag-${code}" class="nc-flag" data-flag="${code}" /><label for="nc-flag-${code}">${label}</label></div>
-  `).join("");
+  document.getElementById("nc-dossier-checks").innerHTML = Object.entries(DOSSIER_FLAGS)
+    .map(([code, label]) => checkRowHtml(`nc-flag-${code}`, label, false, `class="nc-flag" data-flag="${code}" `))
+    .join("");
   newClientBackdrop.classList.add("open");
   document.getElementById("nc-name").focus();
 }
 function closeNewClientModal() {
   newClientBackdrop.classList.remove("open");
   document.getElementById("new-client-form").reset();
+  document.getElementById("nc-vat-preview").textContent = "";
 }
 
 document.getElementById("open-new-client-btn").addEventListener("click", openNewClientModal);
@@ -946,7 +1012,7 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
 
 async function loadClients() {
   const body = document.getElementById("clients-body");
-  body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
   populateResponsibleSelect();
 
   const { data, error } = await supabase
@@ -954,12 +1020,13 @@ async function loadClients() {
     .select("id, name, eik_egn, type, active, responsible_user_id")
     .order("name");
 
-  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма клиенти още.</td></tr>`; return; }
 
   body.innerHTML = "";
   for (const c of data) {
     const tr = document.createElement("tr");
+    tr.className = "clickable-row";
     tr.dataset.id = c.id;
     const masked = maskEgn(c.eik_egn, c.type);
     const isMasked = masked !== c.eik_egn;
@@ -972,7 +1039,6 @@ async function loadClients() {
       <td>${c.type === "legal_entity" ? "ЮЛ" : "ФЛ"}</td>
       <td>${usersById[c.responsible_user_id] ?? "—"}</td>
       <td>${c.active ? "да" : "не"}</td>
-      <td><button class="small edit-client-btn" data-id="${c.id}">Редакция</button></td>
     `;
     body.appendChild(tr);
   }
@@ -987,11 +1053,13 @@ async function loadClients() {
     });
   });
 
-  // Досието се отваря само изрично, през бутона — не при клик върху
-  // произволно място на реда (по изрична заявка, за да не се отваря
-  // случайно при клик).
-  body.querySelectorAll(".edit-client-btn").forEach((btn) => {
-    btn.addEventListener("click", () => toggleClientSettings(btn.closest("tr")));
+  // Клик върху реда отваря досието (по изрична заявка — обратно към
+  // предишното поведение, бутонът "Редакция" е махнат).
+  body.querySelectorAll("tr.clickable-row").forEach((tr) => {
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("a")) return; // не отваряй при клик върху "покажи/скрий"
+      toggleClientSettings(tr);
+    });
   });
 }
 
@@ -1042,12 +1110,9 @@ async function toggleClientSettings(tr) {
   const { data: flags } = await supabase
     .from("client_dossier_flags").select("id, flag").eq("client_id", clientId).is("ended_on", null);
   const activeFlags = new Set((flags ?? []).map((f) => f.flag));
-  dossierDiv.innerHTML = Object.entries(DOSSIER_FLAGS).map(([code, label]) => `
-    <div class="check-row">
-      <input type="checkbox" id="dossier-cb-${code}" class="dossier-cb" data-flag="${code}" ${activeFlags.has(code) ? "checked" : ""} />
-      <label for="dossier-cb-${code}">${label}</label>
-    </div>
-  `).join("");
+  dossierDiv.innerHTML = Object.entries(DOSSIER_FLAGS)
+    .map(([code, label]) => checkRowHtml(`dossier-cb-${code}`, label, activeFlags.has(code), `class="dossier-cb" data-flag="${code}" `))
+    .join("");
   dossierDiv.querySelectorAll(".dossier-cb").forEach((cb) => {
     cb.addEventListener("change", async () => {
       cb.disabled = true;
@@ -1124,6 +1189,7 @@ async function toggleClientSettings(tr) {
       .select("id").eq("client_id", clientId).eq("registration_type_id", vatTypeId).is("ended_on", null).maybeSingle();
     vatCb.disabled = false;
     vatCb.checked = !!vatReg;
+    updateEcVatPreview();
     vatCb.onchange = async () => {
       vatCb.disabled = true;
       if (vatCb.checked) {
@@ -1164,12 +1230,7 @@ async function toggleClientSettings(tr) {
     .map((g) => `
       <div class="obligation-group">
         <h5>${g.label}</h5>
-        ${grouped[g.key].map((o) => `
-          <div class="check-row">
-            <input type="checkbox" id="obl-cb-${o.id}" class="obligation-cb" data-oid="${o.id}" ${enabledIds.has(o.id) ? "checked" : ""} />
-            <label for="obl-cb-${o.id}">${escapeHtml(o.name)}</label>
-          </div>
-        `).join("")}
+        ${grouped[g.key].map((o) => checkRowHtml(`obl-cb-${o.id}`, escapeHtml(o.name), enabledIds.has(o.id), `class="obligation-cb" data-oid="${o.id}" `)).join("")}
       </div>
     `).join("");
   settingsDiv.querySelectorAll(".obligation-cb").forEach((cb) => {

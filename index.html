@@ -392,6 +392,20 @@ async function loadTasks() {
 
   body.querySelectorAll(".complete-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const task = data.find((t) => t.id === btn.dataset.id);
+      const needsConfirmation = task?.obligation_types?.requires_confirmation_upload !== false;
+
+      if (needsConfirmation) {
+        const { count } = await supabase
+          .from("attachments")
+          .select("id", { count: "exact", head: true })
+          .eq("task_id", btn.dataset.id).eq("kind", "confirmation");
+        if (!count || count === 0) {
+          showBanner("Няма прикачено потвърждение — качи го първо (разгъни задачата), преди да я завършиш.");
+          return;
+        }
+      }
+
       // Изрично потвърждение от човек — дори системата да е разпознала
       // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
       if (!confirm("Сигурен ли си, че задачата е завършена?")) return;

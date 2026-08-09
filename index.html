@@ -263,6 +263,9 @@
 
     <section id="tasks-panel">
       <div class="kpis" id="kpis"></div>
+      <div class="clients-toolbar">
+        <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
+      </div>
       <div class="cards" id="tasks-body"><div class="loading">Зареждане…</div></div>
     </section>
 
@@ -360,6 +363,27 @@
       <div class="modal-actions">
         <button type="button" id="close-edit-client-btn">Затвори</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="new-event-task-backdrop">
+    <div class="modal">
+      <h2>Задача по събитие</h2>
+      <p class="hint" style="margin:-8px 0 14px">За задължения "по събитие" (болничен, чл.55, чл.88 ЗКПО, майчинство) — не се генерират автоматично, отварят се ръчно, когато събитието настъпи.</p>
+      <form id="new-event-task-form">
+        <div class="form-table">
+          <div class="form-row"><label for="net-client">Клиент</label><select id="net-client" required></select></div>
+          <div class="form-row"><label for="net-obligation">Задължение</label><select id="net-obligation" required></select></div>
+          <div class="form-row"><label for="net-event-date">Дата на събитието</label><input id="net-event-date" type="date" required /></div>
+          <div class="form-row"><label for="net-period">Период (етикет)</label><input id="net-period" placeholder="напр. 2026-08 или описание" /></div>
+          <div class="form-row"><label for="net-due-date">Срок</label><input id="net-due-date" type="date" /></div>
+          <div class="form-row" id="net-reason-row" style="display:none"><label for="net-reason">Причина (категория, не диагноза)</label><input id="net-reason" placeholder="напр. общо заболяване" /></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancel-new-event-task-btn">Отказ</button>
+          <button class="primary" type="submit">Създай</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -642,6 +666,38 @@ function addDaysISO(iso, days) {
   return dt.toISOString().slice(0, 10);
 }
 
+// --- малко копие на чистите дата-функции от generate-tasks/index.ts
+// (покрити с тестове там) — трябват и тук, за да може ръчно
+// създадена задача по събитие да получи СЪЩОТО пренасяне на срока
+// при почивен ден (чл. 22, ал. 7 ДОПК), не по-занижена логика само
+// защото е ръчна форма. При промяна на едното, пренеси и в другото.
+function lastDayOfMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+function addMonths(y, m, months) {
+  const idx = y * 12 + (m - 1) + months;
+  return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
+}
+function weekdayOf(y, m, d) { return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
+function shiftToBusinessDay(iso, holidaySet) {
+  let [y, m, d] = iso.split("-").map(Number);
+  for (let guard = 0; guard < 30; guard++) {
+    const wd = weekdayOf(y, m, d);
+    const isoNow = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    if (wd !== 0 && wd !== 6 && !holidaySet.has(isoNow)) return isoNow;
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    y = next.getUTCFullYear(); m = next.getUTCMonth() + 1; d = next.getUTCDate();
+  }
+  return iso;
+}
+// deadline_rule "day_of_next_month" спрямо дадена ЕТ дата (не
+// "днес", както в generate-tasks — тук периодът е месецът на
+// СЪБИТИЕТО, не текущият месец).
+function dueDateForEventMonth(eventISO, day) {
+  const [y, m] = eventISO.split("-").map(Number);
+  const due = addMonths(y, m, 1);
+  const d = Math.min(day, lastDayOfMonth(due.y, due.m));
+  return `${due.y}-${String(due.m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 async function loadTasks() {
   const body = document.getElementById("tasks-body");
   const kpis = document.getElementById("kpis");
@@ -777,6 +833,107 @@ async function loadTasks() {
     });
   });
 }
+
+// ---------------- Ръчна задача по събитие (болничен, чл.55, чл.88, майчинство) ----------------
+
+const newEventTaskBackdrop = document.getElementById("new-event-task-backdrop");
+let eventObligationsCache = null; // {id, code, name, deadline_rule, requires_payment}[]
+
+async function openNewEventTaskModal() {
+  const clientSel = document.getElementById("net-client");
+  const oblSel = document.getElementById("net-obligation");
+  clientSel.innerHTML = `<option value="">Зареждане…</option>`;
+  oblSel.innerHTML = `<option value="">Зареждане…</option>`;
+  newEventTaskBackdrop.classList.add("open");
+
+  const { data: clients } = await supabase.from("clients")
+    .select("id, name").eq("active", true).order("name");
+  clientSel.innerHTML = (clients ?? []).map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+
+  if (!eventObligationsCache) {
+    const { data } = await supabase.from("obligation_types")
+      .select("id, code, name, deadline_rule, requires_payment")
+      .eq("trigger_type", "event").is("valid_to", null).order("name");
+    eventObligationsCache = data ?? [];
+  }
+  oblSel.innerHTML = eventObligationsCache.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join("");
+  updateEventTaskDefaults();
+}
+function closeNewEventTaskModal() {
+  newEventTaskBackdrop.classList.remove("open");
+  document.getElementById("new-event-task-form").reset();
+  document.getElementById("net-reason-row").style.display = "none";
+}
+
+// Автоматично предлага период/срок според избраното задължение +
+// датата на събитието — само за 'day_of_next_month' правила (напр.
+// болничен), другите (chl.55 — тримесечно, chl.88/майчинство —
+// ръчно) остават за попълване от човека, не гадаем дата на сляпо.
+function updateEventTaskDefaults() {
+  const oblId = document.getElementById("net-obligation").value;
+  const obligation = eventObligationsCache?.find((o) => o.id === oblId);
+  const eventDate = document.getElementById("net-event-date").value;
+  document.getElementById("net-reason-row").style.display = obligation?.code === "sick_leave" ? "" : "none";
+
+  if (!obligation || !eventDate) return;
+  const periodInput = document.getElementById("net-period");
+  const dueInput = document.getElementById("net-due-date");
+  const [y, m] = eventDate.split("-");
+  if (!periodInput.value) periodInput.value = `${y}-${m}`;
+  if (!dueInput.value && obligation.deadline_rule?.type === "day_of_next_month") {
+    const rawDue = dueDateForEventMonth(eventDate, obligation.deadline_rule.day);
+    supabase.from("holidays").select("holiday_date").then(({ data: holidays }) => {
+      const holidaySet = new Set((holidays ?? []).map((h) => h.holiday_date));
+      dueInput.value = shiftToBusinessDay(rawDue, holidaySet);
+    });
+  }
+}
+
+document.getElementById("open-new-event-task-btn").addEventListener("click", openNewEventTaskModal);
+document.getElementById("cancel-new-event-task-btn").addEventListener("click", closeNewEventTaskModal);
+newEventTaskBackdrop.addEventListener("click", (e) => { if (e.target === newEventTaskBackdrop) closeNewEventTaskModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && newEventTaskBackdrop.classList.contains("open")) closeNewEventTaskModal(); });
+document.getElementById("net-obligation").addEventListener("change", updateEventTaskDefaults);
+document.getElementById("net-event-date").addEventListener("change", updateEventTaskDefaults);
+
+document.getElementById("new-event-task-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const clientId = document.getElementById("net-client").value;
+  const obligationId = document.getElementById("net-obligation").value;
+  const eventDate = document.getElementById("net-event-date").value;
+  const period = document.getElementById("net-period").value.trim() || eventDate.slice(0, 7);
+  const dueDate = document.getElementById("net-due-date").value;
+  const reason = document.getElementById("net-reason").value.trim();
+  const obligation = eventObligationsCache?.find((o) => o.id === obligationId);
+  if (!clientId || !obligationId || !eventDate || !dueDate) {
+    showBanner("Клиент, задължение, дата на събитието и срок са задължителни.");
+    return;
+  }
+  if (obligation?.code === "sick_leave" && !reason) {
+    showBanner("Въведи категория/причина за болничния (не диагноза).");
+    return;
+  }
+
+  const { data: client } = await supabase.from("clients").select("responsible_user_id").eq("id", clientId).single();
+  const { data: newTask, error } = await supabase.from("tasks").insert({
+    client_id: clientId, obligation_type_id: obligationId, period_label: period,
+    event_date: eventDate, due_date: dueDate, assigned_user_id: client?.responsible_user_id ?? null,
+    status: "waiting",
+  }).select("id").single();
+  if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+
+  if (obligation?.requires_payment) {
+    await supabase.from("task_payments").insert({ task_id: newTask.id, due_date: dueDate, paid: false });
+  }
+  if (obligation?.code === "sick_leave") {
+    await supabase.from("task_sick_leave_details").insert({ task_id: newTask.id, reason });
+  }
+  logAudit("task", newTask.id, "event_task_created", { client_id: clientId, obligation_type_id: obligationId });
+
+  closeNewEventTaskModal();
+  showBanner("Задачата е създадена.", "ok");
+  loadTasks();
+});
 
 // ---------------- Детайли на задача: потвърждение + плащане ----------------
 

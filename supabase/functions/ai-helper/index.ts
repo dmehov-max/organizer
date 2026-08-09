@@ -67,7 +67,27 @@ async function buildUserContext(authHeader: string | null): Promise<string> {
   }
 }
 
-Deno.serve(async (req: Request) => {
+// Извлича истинския текстов отговор от Anthropic-отговора — не взима
+// сляпо content[0], защото при разширено "мислене" моделът може да
+// сложи thinking блок преди текстовия, и content[0].text излиза
+// undefined тихо (без грешка от Anthropic). Открито на живо: реален
+// въпрос от потребителя връщаше "(няма отговор)" три пъти подред,
+// въпреки че самото API извикване минаваше успешно (res.ok).
+export function extractReplyText(data: unknown): string {
+  const content = (data as { content?: unknown })?.content;
+  if (!Array.isArray(content)) return "(няма отговор)";
+  const textBlock = content.find((b: any) => b?.type === "text");
+  return textBlock?.text ?? "(няма отговор)";
+}
+
+// import.meta.main е true само когато Deno изпълнява ТОЗИ файл пряко
+// (production) — не и когато тестов файл го импортира само за да
+// ползва export-натите чисти функции по-горе.
+if (import.meta.main) {
+  Deno.serve(handler);
+}
+
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -114,14 +134,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = await res.json();
-    // Не вземаме сляпо content[0] — при разширено "мислене" моделът
-    // може да сложи thinking блок преди текстовия, и content[0].text
-    // излиза undefined (тихо, без грешка от Anthropic) → търсим
-    // изрично първия истински текстов блок. Открито на живо: реален
-    // въпрос от потребителя връщаше "(няма отговор)" три пъти подред,
-    // въпреки че API извикването самото минаваше успешно (res.ok).
-    const textBlock = Array.isArray(data.content) ? data.content.find((b: any) => b?.type === "text") : null;
-    const reply = textBlock?.text ?? "(няма отговор)";
+    const reply = extractReplyText(data);
 
     return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -129,4 +142,4 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders });
   }
-});
+}

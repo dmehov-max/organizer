@@ -417,6 +417,9 @@ const AI_HELPER_URL = `${SUPABASE_URL}/functions/v1/super-handler`;
 // Истинското деплойнато име на recognize-confirmation функцията е
 // "hyper-handler" (Supabase го генерира случайно при създаването).
 const RECOGNIZE_URL = `${SUPABASE_URL}/functions/v1/hyper-handler`;
+// Истинското деплойнато име на generate-tasks функцията е
+// "clever-responder" (Supabase го генерира случайно при създаването).
+const GENERATE_TASKS_URL = `${SUPABASE_URL}/functions/v1/clever-responder`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1221,10 +1224,18 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   }
   // Тригерите в базата (0009_smart_obligation_sync.sql) вече
   // включиха автоматично съответните задължения въз основа на
-  // горните флагове/регистрация + "важи за всички ЮЛ".
+  // горните флагове/регистрация + "важи за всички ЮЛ". Но
+  // generate-tasks е ДНЕВЕН крон — без изричен извик тук задачите
+  // за текущия/предходния период не се появяват до 24ч по-късно.
+  // Извикваме го веднага (обработва всички клиенти, не само новия —
+  // безопасно и идемпотентно заради уникалния индекс в tasks).
+  fetch(GENERATE_TASKS_URL, { method: "POST" })
+    .then((r) => r.ok ? null : r.text().then((t) => console.error("generate-tasks:", r.status, t)))
+    .catch((e) => console.error("generate-tasks fetch failed:", e));
 
   closeNewClientModal();
-  showBanner("Клиентът е създаден.", "ok");
+  showBanner("Клиентът е създаден — задачите за текущия период се генерират…", "ok");
+  setTimeout(loadTasks, 1500); // изчаква generate-tasks, после презарежда таблото
   loadClients();
 });
 

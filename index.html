@@ -1292,15 +1292,18 @@ async function toggleClientSettings(tr) {
     .from("client_obligation_settings").select("obligation_type_id, enabled").eq("client_id", clientId);
   const enabledIds = new Set((settings ?? []).filter((s) => s.enabled).map((s) => s.obligation_type_id));
 
+  // Нишови, специфични по дейност задължения — само за клиенти с
+  // конкретна дейност (туристическо настаняване / патентен данък),
+  // не за повечето клиенти. Собствена група в самия край, вместо
+  // смесени по дата с останалите (по изрична заявка).
+  const NICHE_CODES = new Set(["esti_registration", "esti_monthly_report", "tourist_tax", "chl61r", "patent_declaration"]);
+
   const FREQUENCY_GROUPS = [
     { key: "monthly", label: "Месечни" },
     { key: "quarterly", label: "Тримесечни" },
     { key: "annual", label: "Годишни" },
     { key: "other", label: "По събитие / друго" },
-    // По изрична заявка — ЕСТИ/туристическото настаняване е нишова
-    // дейност (само за клиенти с краткосрочно отдаване под наем),
-    // затова е последна група, не смесена по дата с останалите.
-    { key: "tourism", label: "Туристическо настаняване (ЕСТИ)" },
+    { key: "niche", label: "Специфични по дейност (ЕСТИ, патент)" },
   ];
   const grouped = Object.fromEntries(FREQUENCY_GROUPS.map((g) => [g.key, []]));
   for (const o of obligations ?? []) {
@@ -1309,7 +1312,7 @@ async function toggleClientSettings(tr) {
     // само показва КОГА се дължи спрямо събитието, не колко често
     // самò се случва. Затова trigger_type има предимство пред
     // формата на deadline_rule при групирането.
-    const bucket = o.trigger_type === "activity" ? "tourism"
+    const bucket = NICHE_CODES.has(o.code) ? "niche"
       : o.trigger_type === "event" ? "other"
       : obligationFrequency(o.deadline_rule);
     grouped[bucket].push(o);

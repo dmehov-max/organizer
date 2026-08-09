@@ -498,6 +498,10 @@ function showLogin() {
   mfaChallengeView.style.display = "none";
   appView.style.display = "none";
   myProfile = null;
+  // Модалите живеят извън #app-view (за z-index/overlay причини) —
+  // без това остават отворени НАД логин екрана, ако сесията падне
+  // точно докато някой е бил отворен (открито на живо).
+  document.querySelectorAll(".modal-backdrop.open").forEach((el) => el.classList.remove("open"));
 }
 
 // Проверява дали влезлият потребител има регистрирано 2FA, което
@@ -532,10 +536,21 @@ mfaChallengeForm.addEventListener("submit", async (e) => {
 });
 
 async function enterApp() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    // Сесията е станала невалидна точно сега (изтекла/прекъсната) —
+    // без тази проверка user.id гърми некотролирано и приложението
+    // тихо се връща на логин екрана без никакво съобщение (открито
+    // на живо, при клик "Създай" в "Нов клиент" — вероятно случайно
+    // съвпадение по време с изтекла сесия, не причинено от самия клик).
+    showBanner("Сесията е изтекла — влез отново.");
+    showLogin();
+    return;
+  }
+
   loginView.style.display = "none";
   appView.style.display = "block";
 
-  const { data: { user } } = await supabase.auth.getUser();
   const { data: profile, error } = await supabase
     .from("profiles").select("id, full_name, role").eq("id", user.id).single();
   if (error) { showBanner("Не успях да заредя профила: " + error.message); return; }

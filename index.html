@@ -190,6 +190,9 @@
   /* Клиентският модал — Досие/Настройки едно под друго, не в две
      колони (по изрична заявка), за разлика от детайлите на задача. */
   #edit-client-backdrop .detail-grid { grid-template-columns: 1fr; }
+  /* Досие флаговете — по две на ред, "Активен" (отделен елемент,
+     извън тази мрежа) остава сам на своя ред отдолу. */
+  #dossier-panel { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; }
   .detail-block h4 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .obligation-group { margin-bottom: 14px; }
   .obligation-group:last-child { margin-bottom: 0; }

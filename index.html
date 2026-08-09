@@ -1304,7 +1304,14 @@ async function toggleClientSettings(tr) {
   ];
   const grouped = Object.fromEntries(FREQUENCY_GROUPS.map((g) => [g.key, []]));
   for (const o of obligations ?? []) {
-    const bucket = o.trigger_type === "activity" ? "tourism" : obligationFrequency(o.deadline_rule);
+    // Тригер "по събитие" (болничен, чл.88 ЗКПО, чл.55) не е реално
+    // "месечно", дори deadline_rule да прилича на месечен — датата
+    // само показва КОГА се дължи спрямо събитието, не колко често
+    // самò се случва. Затова trigger_type има предимство пред
+    // формата на deadline_rule при групирането.
+    const bucket = o.trigger_type === "activity" ? "tourism"
+      : o.trigger_type === "event" ? "other"
+      : obligationFrequency(o.deadline_rule);
     grouped[bucket].push(o);
   }
   for (const key of Object.keys(grouped)) {

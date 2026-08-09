@@ -187,6 +187,9 @@
   .detail-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; }
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: .85rem; }
   @media (max-width: 560px) { .detail-grid { grid-template-columns: 1fr; } }
+  /* Клиентският модал — Досие/Настройки едно под друго, не в две
+     колони (по изрична заявка), за разлика от детайлите на задача. */
+  #edit-client-backdrop .detail-grid { grid-template-columns: 1fr; }
   .detail-block h4 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .obligation-group { margin-bottom: 14px; }
   .obligation-group:last-child { margin-bottom: 0; }

@@ -271,6 +271,12 @@
 
     <section id="tasks-panel">
       <div class="kpis" id="kpis"></div>
+      <div class="table-wrap" id="obligation-summary-wrap" style="margin-bottom:16px; display:none">
+        <table>
+          <thead><tr><th>Задължение</th><th>Общо</th><th>Завършени</th><th>Остават</th></tr></thead>
+          <tbody id="obligation-summary-body"></tbody>
+        </table>
+      </div>
       <div class="filter-toolbar">
         <select id="obligation-filter"><option value="">Всички задължения</option></select>
         <select id="sort-by">
@@ -782,7 +788,45 @@ async function loadTasks() {
 
   currentTasksWithLatest = withLatest;
   populateObligationFilter(withLatest);
+  renderObligationSummary(withLatest);
   renderTaskCards();
+}
+
+// Обобщено табло по видове задължения — "с един поглед" колко общо/
+// завършени/остават за ВСЯКО задължение едновременно (не само едно
+// избрано през филтъра), поискано изрично.
+function renderObligationSummary(withLatest) {
+  const wrap = document.getElementById("obligation-summary-wrap");
+  const body = document.getElementById("obligation-summary-body");
+  if (withLatest.length === 0) { wrap.style.display = "none"; return; }
+
+  const byObligation = new Map(); // name -> { total, done }
+  for (const { t } of withLatest) {
+    const name = t.obligation_types?.name ?? "?";
+    const row = byObligation.get(name) ?? { total: 0, done: 0 };
+    row.total++;
+    if (t.status === "completed") row.done++;
+    byObligation.set(name, row);
+  }
+
+  const rows = [...byObligation.entries()].sort((a, b) => b[1].total - a[1].total);
+  body.innerHTML = rows.map(([name, { total, done }]) => `
+    <tr class="obligation-summary-row" data-name="${escapeHtml(name)}" style="cursor:pointer">
+      <td>${escapeHtml(name)}</td>
+      <td>${total}</td>
+      <td>${done}</td>
+      <td>${total - done}</td>
+    </tr>
+  `).join("");
+  wrap.style.display = "";
+
+  body.querySelectorAll(".obligation-summary-row").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      document.getElementById("obligation-filter").value = tr.dataset.name;
+      renderTaskCards();
+      document.getElementById("tasks-body").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 // Задължението-филтър и подредбата работят само върху вече заредените

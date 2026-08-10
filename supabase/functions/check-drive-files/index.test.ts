@@ -4,10 +4,12 @@
 
 import { assertEquals } from "jsr:@std/assert";
 import {
+  base64url,
   candidateMonthFolderNames,
   folderNameMatchesClient,
   normalizeFolderName,
   parseYearMonth,
+  pemToArrayBuffer,
 } from "./index.ts";
 
 // ---------- normalizeFolderName() ----------
@@ -70,4 +72,26 @@ Deno.test("parseYearMonth: тримесечен етикет → null (извъ�
 
 Deno.test("parseYearMonth: годишен етикет → null", () => {
   assertEquals(parseYearMonth("2026"), null);
+});
+
+// ---------- base64url() / pemToArrayBuffer() — JWT подпис helper-и ----------
+
+Deno.test("base64url: няма padding и ползва URL-safe азбука", () => {
+  const out = base64url("hello");
+  assertEquals(out.includes("="), false);
+  assertEquals(out.includes("+"), false);
+  assertEquals(out.includes("/"), false);
+});
+
+Deno.test("base64url: обикновен текст кодира правилно (сверено с познат base64)", () => {
+  // "hello" → base64 "aGVsbG8=" → без padding е "aGVsbG8"
+  assertEquals(base64url("hello"), "aGVsbG8");
+});
+
+Deno.test("pemToArrayBuffer: маха header/footer/whitespace, дължината съвпада с декодирания base64", () => {
+  // синтетичен "PEM" с известно съдържание — не истински ключ, само за формат
+  const raw = "AAECAwQ="; // 4 байта: 00 01 02 03 04 (base64 на 5 байта всъщност — важно е само дължината)
+  const pem = `-----BEGIN PRIVATE KEY-----\n${raw}\n-----END PRIVATE KEY-----\n`;
+  const buf = pemToArrayBuffer(pem);
+  assertEquals(new Uint8Array(buf).length, atob(raw).length);
 });

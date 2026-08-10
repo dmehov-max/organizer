@@ -18,7 +18,6 @@
 //   FIRMI_FOLDER_ID            — ID-то на root папката "Firmi" в Drive
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { JWT } from "npm:google-auth-library@9";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,6 +27,68 @@ const corsHeaders = {
 
 const JOB_NAME = "drive_file_check";
 const DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
+
+// ---------------------------------------------------------------
+// Автентикация със service account — РЪЧЕН JWT/RS256 подпис през
+// вградения Web Crypto API на Deno, вместо "npm:google-auth-library".
+// Причина: библиотеката (+ множеството ѝ под-зависимости — gaxios,
+// gcp-metadata, gtoken, jws...) чупеше бъндъла на Supabase Edge
+// Runtime с неясна грешка ("check is not defined" на ред 1 от
+// компилирания файл — открито на живо при реален деплой). Ръчният
+// подпис е малко повече код, но няма npm зависимости извън тези,
+// които вече знаем, че работят в тази среда.
+export function pemToArrayBuffer(pem: string): ArrayBuffer {
+  const b64 = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, "")
+    .replace(/-----END PRIVATE KEY-----/, "")
+    .replace(/\s+/g, "");
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+export function base64url(input: ArrayBuffer | string): string {
+  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function getDriveAccessToken(clientEmail: string, privateKeyPem: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const claims = {
+    iss: clientEmail,
+    scope: "https://www.googleapis.com/auth/drive.readonly",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  };
+  const unsigned = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`;
+
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToArrayBuffer(privateKeyPem),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  const jwt = `${unsigned}.${base64url(signature)}`;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
+  });
+  if (!res.ok) throw new Error(`Google token exchange failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.access_token;
+}
 
 // ---------------------------------------------------------------
 // Чисти помощни функции (тествани в index.test.ts)
@@ -81,7 +142,7 @@ export function parseYearMonth(periodLabel: string): { year: number; month: numb
 // ---------------------------------------------------------------
 
 async function driveListChildren(
-  jwt: JWT,
+  accessToken: string,
   parentId: string,
   extra = "",
 ): Promise<{ id: string; name: string; mimeType: string; modifiedTime?: string }[]> {
@@ -89,14 +150,16 @@ async function driveListChildren(
   const url = `${DRIVE_FILES_URL}?q=${encodeURIComponent(q)}&fields=${
     encodeURIComponent("files(id,name,mimeType,modifiedTime)")
   }&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-  const res = await jwt.request<{ files: any[] }>({ url });
-  return res.data.files ?? [];
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Drive list failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.files ?? [];
 }
 
-async function findChildFolder(jwt: JWT, parentId: string, name: string) {
+async function findChildFolder(accessToken: string, parentId: string, name: string) {
   const escaped = name.replace(/'/g, "\\'");
   const children = await driveListChildren(
-    jwt,
+    accessToken,
     parentId,
     ` and mimeType = 'application/vnd.google-apps.folder' and name = '${escaped}'`,
   );
@@ -123,12 +186,7 @@ async function handler(req: Request): Promise<Response> {
   try {
     const firmiFolderId = Deno.env.get("FIRMI_FOLDER_ID")!;
     const saKey = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY")!);
-    const jwt = new JWT({
-      email: saKey.client_email,
-      key: saKey.private_key,
-      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
-    });
-    await jwt.authorize();
+    const accessToken = await getDriveAccessToken(saKey.client_email, saKey.private_key);
 
     // Само задачи, които още НЕ са маркирани (веднъж открит файл, не
     // го проверяваме пак всеки път — намалява Drive извикванията) и
@@ -159,7 +217,7 @@ async function handler(req: Request): Promise<Response> {
         let clientFolder = clientFolderCache.get(clientName);
         if (clientFolder === undefined) {
           const topFolders = await driveListChildren(
-            jwt,
+            accessToken,
             firmiFolderId,
             " and mimeType = 'application/vnd.google-apps.folder'",
           );
@@ -169,17 +227,17 @@ async function handler(req: Request): Promise<Response> {
         }
         if (!clientFolder) continue; // няма папка с това име в Firmi — нищо за проверка
 
-        const yearFolder = await findChildFolder(jwt, clientFolder.id, String(ym.year));
+        const yearFolder = await findChildFolder(accessToken, clientFolder.id, String(ym.year));
         if (!yearFolder) continue;
 
         let monthFolder: { id: string; name: string } | null = null;
         for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
-          const f = await findChildFolder(jwt, yearFolder.id, candidate);
+          const f = await findChildFolder(accessToken, yearFolder.id, candidate);
           if (f) { monthFolder = f; break; }
         }
         if (!monthFolder) continue;
 
-        const contents = await driveListChildren(jwt, monthFolder.id);
+        const contents = await driveListChildren(accessToken, monthFolder.id);
         if (contents.length === 0) continue; // папката съществува, но е празна — все още нищо не е качено
 
         const path = `${clientFolder.name}/${yearFolder.name}/${monthFolder.name}`;

@@ -110,7 +110,7 @@
   .banner.ok { background: var(--accent-soft); color: var(--accent-ink); }
 
   /* --- клиенти: лента с бутон + модал за нов клиент --- */
-  .clients-toolbar { display: flex; justify-content: flex-end; margin-bottom: 14px; }
+  .clients-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 14px; }
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(20,20,15,.4);
     display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
@@ -271,6 +271,7 @@
       <div class="kpis" id="kpis"></div>
       <div class="clients-toolbar">
         <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
+        <button id="check-drive-btn">Провери Drive файлове</button>
       </div>
       <div class="cards" id="tasks-body"><div class="loading">Зареждане…</div></div>
     </section>
@@ -420,6 +421,9 @@ const RECOGNIZE_URL = `${SUPABASE_URL}/functions/v1/hyper-handler`;
 // Истинското деплойнато име на generate-tasks функцията е
 // "clever-responder" (Supabase го генерира случайно при създаването).
 const GENERATE_TASKS_URL = `${SUPABASE_URL}/functions/v1/clever-responder`;
+// Истинското деплойнато име на check-drive-files функцията е
+// "swift-worker" (Supabase го генерира случайно при създаването).
+const CHECK_DRIVE_URL = `${SUPABASE_URL}/functions/v1/swift-worker`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -731,6 +735,7 @@ async function loadTasks() {
     .from("tasks")
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
+      files_generated_detected_at,
       clients ( name ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
@@ -778,6 +783,7 @@ async function loadTasks() {
         <div class="client">${escapeHtml(t.clients?.name ?? "?")}</div>
         <div class="obl">${escapeHtml(t.obligation_types?.name ?? "?")} · ${escapeHtml(t.period_label)}</div>
         ${latest?.recognized_reference_number ? `<div class="ref">Вх. № ${escapeHtml(latest.recognized_reference_number)}</div>` : ""}
+        ${t.files_generated_detected_at ? `<div class="ref">📁 файлове в Drive от ${new Date(t.files_generated_detected_at).toLocaleDateString("bg-BG")}</div>` : ""}
       </div>
       <div class="meta">
         <span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span>
@@ -912,6 +918,27 @@ function updateEventTaskDefaults() {
     });
   }
 }
+
+document.getElementById("check-drive-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("check-drive-btn");
+  btn.disabled = true;
+  btn.textContent = "Проверява…";
+  try {
+    const res = await fetch(CHECK_DRIVE_URL, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      showBanner("Грешка при проверка на Drive: " + (data.error ?? (data.errors ?? []).slice(0, 2).join("; ")));
+    } else {
+      showBanner(`Проверени ${data.checked} задачи, намерени файлове за ${data.found}.`, "ok");
+      loadTasks();
+    }
+  } catch (e) {
+    showBanner("Грешка при проверка на Drive: " + String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Провери Drive файлове";
+  }
+});
 
 document.getElementById("open-new-event-task-btn").addEventListener("click", openNewEventTaskModal);
 document.getElementById("cancel-new-event-task-btn").addEventListener("click", closeNewEventTaskModal);

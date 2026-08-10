@@ -20,6 +20,11 @@
 4. `migrations/0003_storage.sql` — частен bucket `attachments` + RLS.
 5. `migrations/0004_audit_self_insert.sql` — позволява на всеки
    потребител да пише в `audit_log` само свои действия.
+6. `migrations/0005_fix_rls_recursion.sql` до `migrations/0033_*.sql`
+   — поредица от инкрементални поправки/добавки (адрес на клиент,
+   ДДС/СОЛ-с-личен-труд smart sync, преименувания и оттегляния на
+   задължения по живи заявки и др.) — самите файлове са описателни,
+   виж папката `migrations/` за пълния, актуален ред.
 
 ## Edge Functions (Edge Functions → Create a new function, paste, Deploy)
 
@@ -27,29 +32,38 @@ Supabase дава им случайно име, ако не смениш пол�
 реалното кръстено име, кодът не го знае предварително:
 
 - `functions/generate-tasks/` — дневен cron, генерира задачи (и вече
-  и записи за плащане, ако задължението го изисква). На живо като
-  **`clever-responder`**.
+  и записи за плащане, ако задължението го изисква); извиква се и
+  директно от index.html веднага след създаване на нов клиент (не се
+  чака дневния крон). На живо като **`clever-responder`**.
 - `functions/send-notifications/` — дневен cron, сборни имейли по
   служител + admin дайджест. Нужен secret `RESEND_API_KEY` (+
   опционално `RESEND_FROM`). На живо като **`hyper-service`**.
 - `functions/recognize-confirmation/` — чете текста на прикачени PDF
-  потвърждения. ⚠️ Използва библиотека (`unpdf`), непотвърдена на
-  живо — виж README в папката ѝ. Все още недеплойната.
+  потвърждения (вх. номер, дублиране, ЕИК/име на фирма). На живо като
+  **`hyper-handler`**.
 - `functions/ai-helper/` — AI помощник, JWT-scoped контекст (не
-  service_role). Нужен secret `ANTHROPIC_API_KEY`. Все още
-  недеплойната.
+  service_role). Нужен secret `ANTHROPIC_API_KEY`. На живо като
+  **`super-handler`**.
+- `functions/check-drive-files/` — проверява наличие на генерирани
+  файлове в Firmi Google Drive папката по клиент/месец (SPEC.md §10;
+  само наличие + дата на промяна, никога не чете съдържание). Нужни
+  secrets `GOOGLE_SERVICE_ACCOUNT_KEY` (цялото JSON на service account
+  ключа) и `FIRMI_FOLDER_ID`. Ползва РЪЧЕН RS256 JWT подпис през Deno
+  Web Crypto — `npm:google-auth-library` чупеше Supabase bundler-а
+  (виж git история). На живо като **`swift-worker`**.
 
 Виж `SPEC.md` в основната папка за пълния модел и обосновка, и
 `.env` (локално, gitignored) за текущите ключове.
 
 ## Тестове
 
-`generate-tasks`, `send-notifications` и `recognize-confirmation` имат
-`index.test.ts` до себе си — тестват чистите функции (дата смятане,
-разпознаване на потвърждения), без да пипат живата база. Написани са
+Всичките шест функции имат `index.test.ts` до себе си — тестват
+чистите функции (дата смятане,
+разпознаване на потвърждения, извличане на текстов отговор от Claude,
+съпоставяне на Drive папки), без да пипат живата база. Написани са
 след като живо тестване разкри реални бъгове (RLS рекурсия, счупен
-regex за отхвърлени декларации и др. — виж git история) — целта е да
-не се повтарят.
+regex за отхвърлени декларации, "(няма отговор)" при thinking блок и
+др. — виж git история) — целта е да не се повтарят.
 
 ```
 deno test --allow-net --allow-env supabase/functions/
@@ -57,5 +71,3 @@ deno test --allow-net --allow-env supabase/functions/
 
 `Deno.serve(...)` е защитено с `if (import.meta.main)` във всяка
 функция — затова тестовият импорт не стартира истински сървър.
-`ai-helper` няма тестове — логиката ѝ е предимно мрежови извиквания
-(Anthropic API, Supabase четене), не чиста логика за unit-тестване.

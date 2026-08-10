@@ -136,6 +136,42 @@ export function parseYearMonth(periodLabel: string): { year: number; month: numb
   return { year: Number(m[1]), month: Number(m[2]) };
 }
 
+/** Best-effort извличане на "ДДС за внасяне/възстановяване" от
+ * суровия DEKLAR.txt (позиционен формат за подаване към НАП, БЕЗ
+ * надписи на полетата — официалната спецификация не е налична тук).
+ * Позициите на кл.20/40/50/60/71 по-долу са изведени ЕМПИРИЧНО от
+ * реален файл (СКРИЙН БОКС ООД, 07.2026), не от документация —
+ * затова НИКОГА не връщаме число, преди да са минали ДВЕ независими
+ * аритметични проверки:
+ *   1. кл.50 (или кл.60) трябва да съвпада с изчисленото кл.20−кл.40
+ *   2. когато е "за внасяне", кл.71 (действително внесен) трябва да
+ *      съвпада с кл.50 — различен, независимо позициониран запис
+ * Ако която и да е проверка не излезе точно (до стотинка), връщаме
+ * null — по-добре нищо, отколкото грешна сума с престорена сигурност. */
+export function parseDeklarVatAmount(
+  text: string,
+): { amount: number; direction: "due" | "refund" } | null {
+  const nums = [...text.matchAll(/-?\d+\.\d{2}/g)].map((m) => Number(m[0]));
+  if (nums.length < 27) return null; // недостатъчно полета — форматът не съвпада с очаквания
+
+  const kl20 = nums[1];
+  const kl40 = nums[22];
+  const kl50 = nums[23];
+  const kl60 = nums[24];
+  const kl71 = nums[26];
+  const diff = Math.round((kl20 - kl40) * 100) / 100;
+
+  if (diff > 0) {
+    if (Math.abs(diff - kl50) > 0.01 || Math.abs(kl71 - kl50) > 0.01) return null;
+    return { amount: kl50, direction: "due" };
+  }
+  if (diff < 0) {
+    if (Math.abs(-diff - kl60) > 0.01) return null;
+    return { amount: kl60, direction: "refund" };
+  }
+  return { amount: 0, direction: "due" }; // нулева декларация — и двете кл.50/кл.60 са 0
+}
+
 // ---------------------------------------------------------------
 // Drive API — тънка обвивка (не се тества директно, само чрез
 // чистите функции по-горе; мрежовите извиквания са интеграционни).
@@ -193,7 +229,7 @@ async function handler(req: Request): Promise<Response> {
     // не са завършени/неприложими.
     const { data: tasks, error: tasksErr } = await supabase
       .from("tasks")
-      .select("id, period_label, client_id, clients ( name )")
+      .select("id, period_label, client_id, clients ( name ), obligation_types ( code )")
       .is("files_generated_detected_at", null)
       .eq("not_applicable", false)
       .neq("status", "completed");

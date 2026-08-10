@@ -58,6 +58,15 @@ export function addMonths(y: number, m: number, months: number): { y: number; m:
   return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
 }
 
+/** Брой дни от `fromISO` до `toISO` (положително = to е по-късно). */
+export function daysBetween(fromISO: string, toISO: string): number {
+  const [fy, fm, fd] = fromISO.split("-").map(Number);
+  const [ty, tm, td] = toISO.split("-").map(Number);
+  const fromMs = Date.UTC(fy, fm - 1, fd);
+  const toMs = Date.UTC(ty, tm - 1, td);
+  return Math.round((toMs - fromMs) / 86400000);
+}
+
 /** чл. 22, ал. 7 ДОПК: пренася до следващия работен ден, ако пада в
  * събота, неделя или официален празник (виж таблица `holidays`). */
 export function shiftToBusinessDay(iso: string, holidaySet: Set<string>): string {
@@ -107,11 +116,19 @@ export function periodsForRule(
     case "fixed_date": {
       // Период = текущата година; фиксирана календарна дата.
       const y = today.y;
+      const dueDateRaw = toISODate(y, rule.month!, rule.day!);
+      // Не backfill-ваме годишно задължение, чийто срок вече е далеч
+      // отминал, при ПЪРВОТО му генериране (напр. нов клиент, добавен
+      // през август — да не получи фантомна "просрочена от март"
+      // задача веднага). Прагът е грубо "разумен прозорец за
+      // наваксване", не точна законова граница — открито на живо,
+      // искане повторено изрично след два подобни случая.
+      if (daysBetween(dueDateRaw, toISODate(today.y, today.m, today.d)) > 60) return [];
       return [{
         periodLabel: `${y}`,
         periodStart: toISODate(y, 1, 1),
         periodEnd: toISODate(y, 12, 31),
-        dueDateRaw: toISODate(y, rule.month!, rule.day!),
+        dueDateRaw,
       }];
     }
     case "monthly_advance_zkpo_schedule": {

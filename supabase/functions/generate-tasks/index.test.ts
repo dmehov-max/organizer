@@ -4,6 +4,7 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
   addMonths,
+  daysBetween,
   lastDayOfMonth,
   pad,
   periodsForRule,
@@ -95,6 +96,31 @@ Deno.test("periodsForRule: fixed_date — текущата година, фик�
     periodEnd: "2026-12-31",
     dueDateRaw: "2026-06-30",
   }]);
+});
+
+Deno.test("periodsForRule: fixed_date — не backfill-ва срок, отминал с над 60 дни (нов клиент, стар годишен срок)", () => {
+  // TODAY = 2026-08-09; срок 02 март е ~160 дни назад — не се генерира
+  const result = periodsForRule({ type: "fixed_date", month: 3, day: 2 }, TODAY);
+  assertEquals(result, []);
+});
+
+Deno.test("periodsForRule: fixed_date — срок в БЪДЕЩЕТО тази година винаги се генерира", () => {
+  const result = periodsForRule({ type: "fixed_date", month: 12, day: 31 }, TODAY);
+  assertEquals(result.length, 1);
+});
+
+// ---------- daysBetween() ----------
+
+Deno.test("daysBetween: положително, когато to е по-късно", () => {
+  assertEquals(daysBetween("2026-03-02", "2026-08-09"), 160);
+});
+
+Deno.test("daysBetween: нула за еднаква дата", () => {
+  assertEquals(daysBetween("2026-08-09", "2026-08-09"), 0);
+});
+
+Deno.test("daysBetween: отрицателно, когато to е по-рано", () => {
+  assertEquals(daysBetween("2026-08-09", "2026-06-30"), -40);
 });
 
 Deno.test("periodsForRule: monthly_advance_zkpo_schedule — яну-мар → 15 апр", () => {

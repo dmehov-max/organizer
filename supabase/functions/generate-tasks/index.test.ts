@@ -5,6 +5,7 @@ import { assertEquals } from "jsr:@std/assert";
 import {
   addMonths,
   daysBetween,
+  dueDateAllowed,
   lastDayOfMonth,
   pad,
   periodsForRule,
@@ -121,6 +122,25 @@ Deno.test("daysBetween: нула за еднаква дата", () => {
 
 Deno.test("daysBetween: отрицателно, когато to е по-рано", () => {
   assertEquals(daysBetween("2026-08-09", "2026-06-30"), -40);
+});
+
+// ---------- dueDateAllowed() ----------
+
+Deno.test("dueDateAllowed: срок ПРЕДИ tasks_start_date не е позволен", () => {
+  assertEquals(dueDateAllowed("2026-06-30", "2026-08-01"), false);
+});
+
+Deno.test("dueDateAllowed: срок СЛЕД tasks_start_date е позволен", () => {
+  assertEquals(dueDateAllowed("2026-08-15", "2026-08-01"), true);
+});
+
+Deno.test("dueDateAllowed: срок точно на tasks_start_date е позволен (включващо)", () => {
+  assertEquals(dueDateAllowed("2026-08-01", "2026-08-01"), true);
+});
+
+Deno.test("dueDateAllowed: липсваща tasks_start_date не ограничава нищо", () => {
+  assertEquals(dueDateAllowed("2020-01-01", null), true);
+  assertEquals(dueDateAllowed("2020-01-01", undefined), true);
 });
 
 Deno.test("periodsForRule: monthly_advance_zkpo_schedule — яну-мар → 15 апр", () => {

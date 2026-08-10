@@ -58,6 +58,20 @@ export function addMonths(y: number, m: number, months: number): { y: number; m:
   return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
 }
 
+/** true = позволено е да генерираме задача с този срок за клиента —
+ * т.е. срокът НЕ е преди `tasksStartDate` (clients.tasks_start_date,
+ * по подразбиране = датата на добавяне в Органайзер). Решава случая
+ * "нова фирма получава фантомна задача за стар срок, който реално не
+ * дължи" (напр. ГДД чл.92 ЗКПО за 2025 г., генерирана за фирма,
+ * регистрирана през 2026 — 41 дни назад, под 60-дневния grace праг
+ * по-долу, но фирмата не е съществувала през облагаемата година).
+ * null/undefined tasksStartDate = няма ограничение (за съвместимост,
+ * не би трябвало да се случва — колоната е NOT NULL). */
+export function dueDateAllowed(dueDate: string, tasksStartDate: string | null | undefined): boolean {
+  if (!tasksStartDate) return true;
+  return dueDate >= tasksStartDate;
+}
+
 /** Брой дни от `fromISO` до `toISO` (положително = to е по-късно). */
 export function daysBetween(fromISO: string, toISO: string): number {
   const [fy, fm, fd] = fromISO.split("-").map(Number);
@@ -231,7 +245,7 @@ async function handler(req: Request): Promise<Response> {
       .from("client_obligation_settings")
       .select(`
         enabled, client_id,
-        clients ( id, active, responsible_user_id ),
+        clients ( id, active, responsible_user_id, tasks_start_date ),
         obligation_types ( id, deadline_rule, valid_to, requires_payment )
       `)
       .eq("enabled", true);
@@ -254,6 +268,7 @@ async function handler(req: Request): Promise<Response> {
 
       for (const p of periods) {
         const dueDate = shiftToBusinessDay(p.dueDateRaw, holidaySet);
+        if (!dueDateAllowed(dueDate, client.tasks_start_date)) continue;
 
         const { data: insertedTask, error: insertErr } = await supabase
           .from("tasks")

@@ -367,6 +367,11 @@
           </div>
           <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
           <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
+          <div class="form-row"><label for="ec-tasks-start">Генерирай задачи от</label>
+            <div><input id="ec-tasks-start" type="date" />
+              <div class="hint" style="margin-top:4px">Задачи със срок преди тази дата НЕ се генерират автоматично — по подразбиране датата на добавяне в Органайзер, промени я само ако фирмата реално дължи стари, отминали срокове.</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1557,7 +1562,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date").eq("id", clientId).single();
   const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
   activeCb.onchange = async () => {
@@ -1581,6 +1586,7 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
   document.getElementById("ec-city").value = clientRow?.address_city ?? "";
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
+  document.getElementById("ec-tasks-start").value = clientRow?.tasks_start_date ?? "";
   currentEditClientType = clientRow?.type ?? "legal_entity";
   updateEcEikHint();
 
@@ -1592,10 +1598,11 @@ async function toggleClientSettings(tr) {
     const eik = document.getElementById("ec-eik").value.trim();
     const city = document.getElementById("ec-city").value.trim();
     const street = document.getElementById("ec-street").value.trim();
+    const tasksStart = document.getElementById("ec-tasks-start").value;
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
     if (!updateEcEikHint()) { showBanner(`${currentEditClientType === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(currentEditClientType)} цифри — не е записано.`); return; }
     const { error } = await supabase.from("clients")
-      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null }).eq("id", clientId);
+      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
@@ -1608,7 +1615,7 @@ async function toggleClientSettings(tr) {
   // всяко отваряне (и щеше да пише в СТАРИЯ clientId при следващо
   // blur). Присвояването сменя предишния, само последният важи —
   // същият похват, ползван по-долу за vatCb.onchange/activeCb.onchange.
-  ["ec-name", "ec-eik", "ec-city", "ec-street"].forEach((id) => {
+  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start"].forEach((id) => {
     document.getElementById(id).onblur = saveCompanyData;
   });
 

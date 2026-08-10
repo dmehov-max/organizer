@@ -189,6 +189,18 @@ async function handler(req: Request): Promise<Response> {
   try {
     const today = sofiaToday();
 
+    // Опционален client_id в тялото — за целенасочен извик веднага
+    // след създаване на НОВ клиент (виж index.html), за да не се
+    // пипат/възкресяват изтрити задачи на ВСИЧКИ останали клиенти.
+    // Дневният крон продължава без него (обработва всички, както досега).
+    let onlyClientId: string | null = null;
+    try {
+      const body = await req.json();
+      onlyClientId = body?.client_id ?? null;
+    } catch (_e) {
+      // няма тяло (напр. крон извик без body) — обработва всички, наред е
+    }
+
     const { data: holidaysData, error: holidaysErr } = await supabase
       .from("holidays")
       .select("holiday_date");
@@ -198,14 +210,16 @@ async function handler(req: Request): Promise<Response> {
     // Всички включени задължения по клиент — филтрираме активни
     // клиенти и текущата версия на всяко задължение в JS (не през
     // embedded-filter синтаксис в PostgREST, за да е по-предвидимо).
-    const { data: rows, error: rowsErr } = await supabase
+    let query = supabase
       .from("client_obligation_settings")
       .select(`
-        enabled,
+        enabled, client_id,
         clients ( id, active, responsible_user_id ),
         obligation_types ( id, deadline_rule, valid_to, requires_payment )
       `)
       .eq("enabled", true);
+    if (onlyClientId) query = query.eq("client_id", onlyClientId);
+    const { data: rows, error: rowsErr } = await query;
     if (rowsErr) throw rowsErr;
 
     const activeRows = (rows ?? []).filter((r: any) =>

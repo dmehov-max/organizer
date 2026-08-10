@@ -1349,9 +1349,12 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   // горните флагове/регистрация + "важи за всички ЮЛ". Но
   // generate-tasks е ДНЕВЕН крон — без изричен извик тук задачите
   // за текущия/предходния период не се появяват до 24ч по-късно.
-  // Извикваме го веднага (обработва всички клиенти, не само новия —
-  // безопасно и идемпотентно заради уникалния индекс в tasks).
-  fetch(GENERATE_TASKS_URL, { method: "POST" })
+  // Извикваме го веднага, но САМО за новия клиент (client_id в
+  // тялото) — иначе обработва всички клиенти наведнъж и възкресява
+  // задачи, изтрити нарочно за други, вече съществуващи клиенти
+  // (открито на живо: създаване на нов клиент върна изтрити стари
+  // задачи и на Корект Преместване, и на Мехов Консулт).
+  fetch(GENERATE_TASKS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: newClient.id }) })
     .then((r) => r.ok ? null : r.text().then((t) => console.error("generate-tasks:", r.status, t)))
     .catch((e) => console.error("generate-tasks fetch failed:", e));
 

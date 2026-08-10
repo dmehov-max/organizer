@@ -805,16 +805,26 @@ function renderObligationSummary(withLatest) {
   const body = document.getElementById("obligation-summary-body");
   if (withLatest.length === 0) { wrap.style.display = "none"; return; }
 
-  const byObligation = new Map(); // name -> { total, done }
+  const byObligation = new Map(); // name -> { total, done, nextDue }
   for (const { t } of withLatest) {
     const name = t.obligation_types?.name ?? "?";
-    const row = byObligation.get(name) ?? { total: 0, done: 0 };
+    const row = byObligation.get(name) ?? { total: 0, done: 0, nextDue: null };
     row.total++;
     if (t.status === "completed") row.done++;
+    // nextDue = най-близкият срок сред ОЩЕ незавършените — за да се
+    // подреди таблицата по спешност (кой изтича първи, най-отгоре).
+    // Завършените изцяло задължения (nextDue остава null) отиват
+    // най-долу — вече няма спешност там.
+    else if (row.nextDue === null || t.due_date < row.nextDue) row.nextDue = t.due_date;
     byObligation.set(name, row);
   }
 
-  const rows = [...byObligation.entries()].sort((a, b) => b[1].total - a[1].total);
+  const rows = [...byObligation.entries()].sort((a, b) => {
+    if (a[1].nextDue === null && b[1].nextDue === null) return 0;
+    if (a[1].nextDue === null) return 1;
+    if (b[1].nextDue === null) return -1;
+    return a[1].nextDue.localeCompare(b[1].nextDue);
+  });
   body.innerHTML = rows.map(([name, { total, done }]) => `
     <tr class="obligation-summary-row" data-name="${escapeHtml(name)}" style="cursor:pointer">
       <td>${escapeHtml(name)}</td>

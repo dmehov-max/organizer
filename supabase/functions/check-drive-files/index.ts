@@ -227,20 +227,37 @@ async function handler(req: Request): Promise<Response> {
         }
         if (!clientFolder) continue; // няма папка с това име в Firmi — нищо за проверка
 
-        const yearFolder = await findChildFolder(accessToken, clientFolder.id, String(ym.year));
-        if (!yearFolder) continue;
-
+        // Основен път: [Фирма]/[Година]/[ММ или ММ.Година]/ — общата
+        // месечна структура (наблюдавана на живо за повечето видове).
         let monthFolder: { id: string; name: string } | null = null;
-        for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
-          const f = await findChildFolder(accessToken, yearFolder.id, candidate);
-          if (f) { monthFolder = f; break; }
+        let pathPrefix: string | null = null;
+        const yearFolder = await findChildFolder(accessToken, clientFolder.id, String(ym.year));
+        if (yearFolder) {
+          for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
+            const f = await findChildFolder(accessToken, yearFolder.id, candidate);
+            if (f) { monthFolder = f; pathPrefix = `${clientFolder.name}/${yearFolder.name}`; break; }
+          }
+        }
+
+        // Резервен път: [Фирма]/ДДС/[ММ.Година]/ — ДДС има собствена
+        // папка на ниво фирма при някои клиенти, отделно от годишното
+        // дърво (наблюдавано на живо: СКРИЙН БОКС ООД/ДДС/07.2026/,
+        // с DEKLAR.txt/POKUPKI.txt/PRODAGBI.txt — реалните ДДС експорти).
+        if (!monthFolder) {
+          const ddsFolder = await findChildFolder(accessToken, clientFolder.id, "ДДС");
+          if (ddsFolder) {
+            for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
+              const f = await findChildFolder(accessToken, ddsFolder.id, candidate);
+              if (f) { monthFolder = f; pathPrefix = `${clientFolder.name}/${ddsFolder.name}`; break; }
+            }
+          }
         }
         if (!monthFolder) continue;
 
         const contents = await driveListChildren(accessToken, monthFolder.id);
         if (contents.length === 0) continue; // папката съществува, но е празна — все още нищо не е качено
 
-        const path = `${clientFolder.name}/${yearFolder.name}/${monthFolder.name}`;
+        const path = `${pathPrefix}/${monthFolder.name}`;
         await supabase.from("tasks").update({
           files_generated_detected_at: new Date().toISOString(),
           files_generated_detected_path: path,

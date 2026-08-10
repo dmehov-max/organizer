@@ -111,6 +111,8 @@
 
   /* --- клиенти: лента с бутон + модал за нов клиент --- */
   .clients-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 14px; }
+  .filter-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .filter-toolbar select { max-width: 220px; }
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(20,20,15,.4);
     display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
@@ -269,6 +271,15 @@
 
     <section id="tasks-panel">
       <div class="kpis" id="kpis"></div>
+      <div class="filter-toolbar">
+        <select id="obligation-filter"><option value="">Всички задължения</option></select>
+        <select id="sort-by">
+          <option value="due_date">Подреди по срок</option>
+          <option value="client">Подреди по клиент</option>
+          <option value="obligation">Подреди по задължение</option>
+        </select>
+        <span class="hint" id="filter-summary"></span>
+      </div>
       <div class="clients-toolbar">
         <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
         <button id="check-drive-btn">Провери Drive файлове</button>
@@ -769,8 +780,56 @@ async function loadTasks() {
     <div class="kpi"><div class="n">${activeClients ?? "—"}</div><div class="l">Активни клиенти</div></div>
   `;
 
+  currentTasksWithLatest = withLatest;
+  populateObligationFilter(withLatest);
+  renderTaskCards();
+}
+
+// Задължението-филтър и подредбата работят само върху вече заредените
+// данни (без нова заявка) — за бърз преглед "колко общо/завършени/
+// остават" по конкретно задължение (напр. ДДС), поискано изрично.
+let currentTasksWithLatest = [];
+
+function populateObligationFilter(withLatest) {
+  const sel = document.getElementById("obligation-filter");
+  const prevValue = sel.value;
+  const names = [...new Set(withLatest.map(({ t }) => t.obligation_types?.name).filter(Boolean))].sort();
+  sel.innerHTML = `<option value="">Всички задължения</option>` +
+    names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  if (names.includes(prevValue)) sel.value = prevValue;
+}
+
+function renderTaskCards() {
+  const body = document.getElementById("tasks-body");
+  const today = todayISO();
+  const obligationFilter = document.getElementById("obligation-filter").value;
+  const sortBy = document.getElementById("sort-by").value;
+
+  let list = currentTasksWithLatest;
+  if (obligationFilter) list = list.filter(({ t }) => t.obligation_types?.name === obligationFilter);
+
+  const sorted = [...list].sort((a, b) => {
+    if (sortBy === "client") return (a.t.clients?.name ?? "").localeCompare(b.t.clients?.name ?? "", "bg");
+    if (sortBy === "obligation") return (a.t.obligation_types?.name ?? "").localeCompare(b.t.obligation_types?.name ?? "", "bg");
+    return a.t.due_date.localeCompare(b.t.due_date);
+  });
+
+  // "С един поглед" обзор — само когато е филтрирано по конкретно
+  // задължение (иначе "общо/завършени" за всичко заедно не значи
+  // много), поискано изрично за ДДС фокус.
+  const summaryEl = document.getElementById("filter-summary");
+  if (obligationFilter) {
+    const total = list.length;
+    const doneCount = list.filter(({ t }) => t.status === "completed").length;
+    summaryEl.textContent = `${total} общо · ${doneCount} завършени · ${total - doneCount} остават`;
+  } else {
+    summaryEl.textContent = "";
+  }
+
+  if (sorted.length === 0) { body.innerHTML = `<div class="empty">Няма задачи по този филтър.</div>`; return; }
+
   body.innerHTML = "";
-  for (const { t, latest } of withLatest) {
+  for (const { t, latest } of sorted) {
     const card = document.createElement("div");
     const overdue = t.due_date < today && t.status !== "completed";
     card.className = "card" + (overdue ? " overdue" : "");
@@ -804,7 +863,7 @@ async function loadTasks() {
   body.querySelectorAll(".card").forEach((card) => {
     card.addEventListener("click", (e) => {
       if (e.target.closest("button")) return; // не разгъвай при клик върху бутон
-      toggleDetail(card, data.find((t) => t.id === card.dataset.id));
+      toggleDetail(card, currentTasksWithLatest.find(({ t }) => t.id === card.dataset.id)?.t);
     });
   });
 
@@ -821,7 +880,7 @@ async function loadTasks() {
 
   body.querySelectorAll(".complete-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const task = data.find((t) => t.id === btn.dataset.id);
+      const task = currentTasksWithLatest.find(({ t }) => t.id === btn.dataset.id)?.t;
       const needsConfirmation = task?.obligation_types?.requires_confirmation_upload !== false;
 
       if (task?.confirmation_status === "rejected") {
@@ -863,6 +922,9 @@ async function loadTasks() {
     });
   });
 }
+
+document.getElementById("obligation-filter").addEventListener("change", renderTaskCards);
+document.getElementById("sort-by").addEventListener("change", renderTaskCards);
 
 // ---------------- Ръчна задача по събитие (болничен, чл.55, чл.88, майчинство) ----------------
 

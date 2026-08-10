@@ -736,7 +736,7 @@ async function loadTasks() {
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
       files_generated_detected_at,
-      clients ( name ),
+      clients ( name, eik_egn ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
     `)
@@ -1024,7 +1024,7 @@ async function toggleDetail(card, task) {
   // Прикачени файлове
   const { data: attachments } = await supabase
     .from("attachments")
-    .select("id, kind, uploaded_at, recognized_marker, recognized_reference_number, recognized_client_name, client_name_mismatch, duplicate_of_attachment_id")
+    .select("id, kind, uploaded_at, recognized_marker, recognized_reference_number, recognized_client_name, recognized_declared_eik, client_name_mismatch, duplicate_of_attachment_id")
     .eq("task_id", task.id).order("uploaded_at", { ascending: false });
   const attList = document.getElementById(`attachments-list-${task.id}`);
   if (!attachments || attachments.length === 0) {
@@ -1036,10 +1036,43 @@ async function toggleDetail(card, task) {
         — ${new Date(a.uploaded_at).toLocaleString("bg-BG")}
         ${a.recognized_marker ? `<span class="pill pill-${a.recognized_marker}" style="margin-left:6px">${a.recognized_marker === "accepted" ? "разпознато: прието" : "разпознато: отказано"}</span>` : ""}
         ${a.recognized_reference_number ? `<div class="hint" style="margin-top:2px">Вх. № ${escapeHtml(a.recognized_reference_number)}${a.recognized_client_name ? " · " + escapeHtml(a.recognized_client_name) : ""}</div>` : ""}
-        ${a.duplicate_of_attachment_id ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ дублиран входящ номер — вече качен друг път</span></div>` : ""}
-        ${a.client_name_mismatch ? `<div style="margin-top:4px"><span class="pill pill-rejected">⚠ документът е за друга фирма — провери!</span></div>` : ""}
+        ${a.duplicate_of_attachment_id ? `
+          <div style="margin-top:4px">
+            <span class="pill pill-rejected">⚠ дублиран входящ номер — вече качен друг път</span>
+            <button class="small resolve-duplicate-btn" data-id="${a.id}" style="margin-left:6px">Разреши</button>
+          </div>` : ""}
+        ${a.client_name_mismatch ? `
+          <div style="margin-top:4px">
+            <span class="pill pill-rejected">⚠ документът е за друга фирма — провери!</span>
+            <button class="small resolve-mismatch-btn" data-id="${a.id}" style="margin-left:6px">Разреши</button>
+            <div class="hint" style="margin-top:2px">
+              ЕИК от документа: ${a.recognized_declared_eik ? escapeHtml(a.recognized_declared_eik) : "не е разпознат"}
+              · ЕИК на клиента: ${escapeHtml(task.clients?.eik_egn ?? "?")}
+            </div>
+          </div>` : ""}
       </div>
     `).join("");
+
+    attList.querySelectorAll(".resolve-mismatch-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const { error } = await supabase.from("attachments").update({ client_name_mismatch: false }).eq("id", btn.dataset.id);
+        if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
+        logAudit("attachment", btn.dataset.id, "mismatch_resolved", { task_id: task.id });
+        showBanner("Прието — вече не блокира завършването.", "ok");
+        toggleDetail(card, task); toggleDetail(card, task); // презареди детайла
+      });
+    });
+    attList.querySelectorAll(".resolve-duplicate-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const { error } = await supabase.from("attachments").update({ duplicate_of_attachment_id: null }).eq("id", btn.dataset.id);
+        if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
+        logAudit("attachment", btn.dataset.id, "duplicate_resolved", { task_id: task.id });
+        showBanner("Прието — вече не блокира завършването.", "ok");
+        toggleDetail(card, task); toggleDetail(card, task); // презареди детайла
+      });
+    });
   }
 
   const uploadBtn = document.getElementById(`upload-btn-${task.id}`);

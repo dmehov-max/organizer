@@ -250,6 +250,7 @@ async function handler(req: Request): Promise<Response> {
       recognized_marker: marker,
       recognized_reference_number: referenceNumber,
       recognized_client_name: declaredCompanyName,
+      recognized_declared_eik: declaredEik,
       client_name_mismatch: clientNameMismatch,
       duplicate_of_attachment_id: duplicateOfId,
     }).eq("id", attachmentId);

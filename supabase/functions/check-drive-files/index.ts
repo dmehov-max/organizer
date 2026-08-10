@@ -294,10 +294,40 @@ async function handler(req: Request): Promise<Response> {
         if (contents.length === 0) continue; // папката съществува, но е празна — все още нищо не е качено
 
         const path = `${pathPrefix}/${monthFolder.name}`;
-        await supabase.from("tasks").update({
+        const updatePayload: Record<string, unknown> = {
           files_generated_detected_at: new Date().toISOString(),
           files_generated_detected_path: path,
-        }).eq("id", task.id);
+        };
+
+        // Best-effort сума на ДДС — само за задължението за ДДС, само
+        // ако DEKLAR.txt е сред намерените файлове, и само ако мине
+        // двойната самопроверка в parseDeklarVatAmount() (виж коментара
+        // там — иначе не пишем нищо, по-добре липсващо от грешно число).
+        if ((task.obligation_types as any)?.code === "vat_declaration") {
+          const deklarFile = contents.find((f) => /deklar/i.test(f.name));
+          if (deklarFile) {
+            const fileRes = await fetch(
+              `${DRIVE_FILES_URL}/${deklarFile.id}?alt=media`,
+              { headers: { Authorization: `Bearer ${accessToken}` } },
+            );
+            if (fileRes.ok) {
+              const buf = await fileRes.arrayBuffer();
+              let text: string;
+              try {
+                text = new TextDecoder("windows-1251").decode(buf);
+              } catch (_e) {
+                text = new TextDecoder().decode(buf); // резервно, само цифрите ни трябват все пак
+              }
+              const vat = parseDeklarVatAmount(text);
+              if (vat) {
+                updatePayload.drive_detected_vat_amount = vat.amount;
+                updatePayload.drive_detected_vat_direction = vat.direction;
+              }
+            }
+          }
+        }
+
+        await supabase.from("tasks").update(updatePayload).eq("id", task.id);
         found++;
       } catch (e) {
         errors.push(`task ${task.id}: ${String(e)}`);

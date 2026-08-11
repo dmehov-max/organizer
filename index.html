@@ -95,6 +95,14 @@
   tbody tr:last-child td { border-bottom: none; }
   tr.clickable-row { cursor: pointer; }
   tr.clickable-row:hover { background: var(--accent-soft); }
+  /* --- прогрес-таблица (Създаване/Проверка/Подаване) --- */
+  .stage-cell { font-weight: 700; font-size: 1rem; color: var(--muted); transition: background .1s; }
+  .stage-cell:hover { background: var(--accent-soft); }
+  .stage-cell.stage-done { color: var(--ok, #2e7d32); }
+  .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .progress-pct.progress-done { color: var(--ok, #2e7d32); }
+  tr.progress-total-row td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; background: var(--accent-soft); }
+
   .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
   .pill-waiting { background: var(--amber-soft); color: var(--amber); }
   .pill-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
@@ -279,6 +287,7 @@
       </div>
       <div class="filter-toolbar">
         <select id="obligation-filter"><option value="">Всички задължения</option></select>
+        <select id="responsible-filter"><option value="">Всички отговорници</option></select>
         <select id="sort-by">
           <option value="due_date">Подреди по срок</option>
           <option value="client">Подреди по клиент</option>
@@ -289,6 +298,22 @@
       <div class="clients-toolbar">
         <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
         <button id="check-drive-btn">Провери Drive файлове</button>
+      </div>
+      <div class="table-wrap" id="progress-table-wrap" style="display:none; overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
+            <th>Създаване</th><th>Проверка</th><th>Подаване</th>
+          </tr></thead>
+          <tbody id="progress-table-body"></tbody>
+          <tfoot><tr class="progress-total-row">
+            <td colspan="4">Общ прогрес</td>
+            <td id="progress-total-pct"></td>
+            <td id="progress-total-creation"></td>
+            <td id="progress-total-review"></td>
+            <td id="progress-total-submission"></td>
+          </tr></tfoot>
+        </table>
       </div>
       <div class="cards" id="tasks-body"><div class="loading">Зареждане…</div></div>
     </section>
@@ -710,6 +735,10 @@ function formatDueBox(iso) {
   const [, m, d] = iso.split("-").map(Number);
   return { day: String(d).padStart(2, "0"), month: MONTH_ABBR[m - 1] };
 }
+function formatDateBg(iso) {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
 function addDaysISO(iso, days) {
   const dt = new Date(iso + "T00:00:00Z");
   dt.setUTCDate(dt.getUTCDate() + days);
@@ -758,7 +787,8 @@ async function loadTasks() {
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
-      clients ( name, eik_egn ),
+      stage_creation_done, stage_review_done, stage_submission_done,
+      clients ( name, eik_egn, type ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
     `)
@@ -793,8 +823,17 @@ async function loadTasks() {
 
   currentTasksWithLatest = withLatest;
   populateObligationFilter(withLatest);
+  populateResponsibleFilter();
   renderObligationSummary(withLatest);
   renderTaskCards();
+}
+
+function populateResponsibleFilter() {
+  const sel = document.getElementById("responsible-filter");
+  const prevValue = sel.value;
+  sel.innerHTML = `<option value="">Всички отговорници</option>` +
+    Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
+  sel.value = prevValue;
 }
 
 // Обобщено табло по видове задължения — "с един поглед" колко общо/
@@ -860,12 +899,27 @@ function populateObligationFilter(withLatest) {
 
 function renderTaskCards() {
   const body = document.getElementById("tasks-body");
+  const progressWrap = document.getElementById("progress-table-wrap");
   const today = todayISO();
   const obligationFilter = document.getElementById("obligation-filter").value;
+  const responsibleFilter = document.getElementById("responsible-filter").value;
   const sortBy = document.getElementById("sort-by").value;
 
   let list = currentTasksWithLatest;
   if (obligationFilter) list = list.filter(({ t }) => t.obligation_types?.name === obligationFilter);
+  if (responsibleFilter) list = list.filter(({ t }) => t.assigned_user_id === responsibleFilter);
+
+  // Прогрес-таблицата (Създаване/Проверка/Подаване, по образец на
+  // Controlisy) се показва вместо картите, само когато е избрано
+  // конкретно задължение — иначе "прогрес" за разнородни задължения
+  // едновременно не значи нищо смислено. Поискано изрично.
+  if (obligationFilter) {
+    body.style.display = "none";
+    progressWrap.style.display = "";
+  } else {
+    body.style.display = "";
+    progressWrap.style.display = "none";
+  }
 
   const sorted = [...list].sort((a, b) => {
     if (sortBy === "client") return (a.t.clients?.name ?? "").localeCompare(b.t.clients?.name ?? "", "bg");
@@ -884,6 +938,8 @@ function renderTaskCards() {
   } else {
     summaryEl.textContent = "";
   }
+
+  if (obligationFilter) { renderProgressTable(sorted); return; }
 
   if (sorted.length === 0) { body.innerHTML = `<div class="empty">Няма задачи по този филтър.</div>`; return; }
 
@@ -983,7 +1039,75 @@ function renderTaskCards() {
   });
 }
 
+// Прогрес-таблица по образец на Controlisy — Създаване/Проверка/
+// Подаване като 3 отделни отметки на задача, вместо единствен
+// статус; показва се вместо картите само когато е избрано конкретно
+// задължение (иначе прогресът на разнородни задължения не значи нищо).
+const STAGE_COLUMNS = [
+  ["stage_creation_done", "creation"],
+  ["stage_review_done", "review"],
+  ["stage_submission_done", "submission"],
+];
+
+function renderProgressTable(sorted) {
+  const body = document.getElementById("progress-table-body");
+  if (sorted.length === 0) {
+    body.innerHTML = `<tr><td colspan="8" class="empty">Няма задачи по този филтър.</td></tr>`;
+    document.getElementById("progress-total-pct").textContent = "";
+    document.getElementById("progress-total-creation").textContent = "";
+    document.getElementById("progress-total-review").textContent = "";
+    document.getElementById("progress-total-submission").textContent = "";
+    return;
+  }
+
+  const stageCell = (t, field, key) => {
+    const done = !!t[field];
+    return `<td class="stage-cell${done ? " stage-done" : ""}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center">${done ? "✓" : ""}</td>`;
+  };
+
+  body.innerHTML = sorted.map(({ t }) => {
+    const doneCount = STAGE_COLUMNS.filter(([field]) => t[field]).length;
+    const pct = Math.round((doneCount / STAGE_COLUMNS.length) * 100);
+    return `
+      <tr data-task-id="${t.id}">
+        <td>${escapeHtml(t.clients?.name ?? "?")}</td>
+        <td>${maskEgn(t.clients?.eik_egn, t.clients?.type)}</td>
+        <td>${escapeHtml(t.period_label)}</td>
+        <td>${formatDateBg(t.due_date)}</td>
+        <td class="progress-pct${pct === 100 ? " progress-done" : ""}">${pct}%</td>
+        ${stageCell(t, "stage_creation_done", "creation")}
+        ${stageCell(t, "stage_review_done", "review")}
+        ${stageCell(t, "stage_submission_done", "submission")}
+      </tr>
+    `;
+  }).join("");
+
+  const total = sorted.length;
+  const sumPct = sorted.reduce((acc, { t }) => acc + STAGE_COLUMNS.filter(([field]) => t[field]).length, 0);
+  const overallPct = Math.round((sumPct / (total * STAGE_COLUMNS.length)) * 100);
+  document.getElementById("progress-total-pct").textContent = `${overallPct}%`;
+  for (const [field, key] of STAGE_COLUMNS) {
+    const doneCount = sorted.filter(({ t }) => t[field]).length;
+    document.getElementById(`progress-total-${key}`).textContent = `${doneCount}/${total}`;
+  }
+
+  body.querySelectorAll(".stage-cell").forEach((cell) => {
+    cell.addEventListener("click", async () => {
+      const { id, field } = cell.dataset;
+      const entry = currentTasksWithLatest.find(({ t }) => t.id === id);
+      if (!entry) return;
+      const newValue = !entry.t[field];
+      const { error } = await supabase.from("tasks").update({ [field]: newValue }).eq("id", id);
+      if (error) { showBanner("Грешка при запис: " + error.message); return; }
+      entry.t[field] = newValue; // обновяваме локалния кеш, без нова заявка
+      logAudit("task", id, "stage_changed", { field, value: newValue });
+      renderTaskCards(); // презарежда прогрес-таблицата от кеша, без fetch
+    });
+  });
+}
+
 document.getElementById("obligation-filter").addEventListener("change", renderTaskCards);
+document.getElementById("responsible-filter").addEventListener("change", renderTaskCards);
 document.getElementById("sort-by").addEventListener("change", renderTaskCards);
 
 // ---------------- Ръчна задача по събитие (болничен, чл.55, чл.88, майчинство) ----------------

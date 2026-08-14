@@ -945,10 +945,15 @@ function renderTaskCards() {
 
   if (obligationFilter) { renderProgressTable(sorted); return; }
 
-  if (sorted.length === 0) { body.innerHTML = `<div class="empty">Няма задачи по този филтър.</div>`; return; }
+  // Завършените изчезват от основния списък (той е "какво остава да
+  // се свърши", не архив) — прогрес-таблицата по-горе пази пълната
+  // 100% картина, ако потрябва.
+  const cardList = sorted.filter(({ t }) => t.status !== "completed");
+
+  if (cardList.length === 0) { body.innerHTML = `<div class="empty">Няма задачи по този филтър.</div>`; return; }
 
   body.innerHTML = "";
-  for (const { t, latest } of sorted) {
+  for (const { t, latest } of cardList) {
     const card = document.createElement("div");
     const overdue = t.due_date < today && t.status !== "completed";
     card.className = "card" + (overdue ? " overdue" : "");

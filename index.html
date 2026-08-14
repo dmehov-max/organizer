@@ -99,6 +99,7 @@
   .stage-cell { font-weight: 700; font-size: 1rem; color: var(--muted); transition: background .1s; }
   .stage-cell:hover { background: var(--accent-soft); }
   .stage-cell.stage-done { color: var(--ok, #2e7d32); }
+  .stage-cell .ref-mini { font-size: .68rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
   .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
   .progress-pct.progress-done { color: var(--ok, #2e7d32); }
   tr.progress-total-row td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; background: var(--accent-soft); }
@@ -787,7 +788,7 @@ async function loadTasks() {
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status,
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
-      stage_creation_done, stage_review_done, stage_submission_done,
+      stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
       clients ( name, eik_egn, type ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id )
@@ -1062,7 +1063,9 @@ function renderProgressTable(sorted) {
 
   const stageCell = (t, field, key) => {
     const done = !!t[field];
-    return `<td class="stage-cell${done ? " stage-done" : ""}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center">${done ? "✓" : ""}</td>`;
+    const refNumber = field === "stage_submission_done" ? t.submission_reference_number : null;
+    const title = refNumber ? ` title="№ ${escapeHtml(refNumber)}"` : "";
+    return `<td class="stage-cell${done ? " stage-done" : ""}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${done ? "✓" : ""}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
   };
 
   body.innerHTML = sorted.map(({ t }) => {
@@ -1097,10 +1100,28 @@ function renderProgressTable(sorted) {
       const entry = currentTasksWithLatest.find(({ t }) => t.id === id);
       if (!entry) return;
       const newValue = !entry.t[field];
-      const { error } = await supabase.from("tasks").update({ [field]: newValue }).eq("id", id);
+      const update = { [field]: newValue };
+
+      // При отбелязване на "Подаване" номерът на декларацията е
+      // задължителен (поискано изрично) — предварително попълнен с
+      // вече записания, ако маркираш обратно след отмятане. При
+      // разотметка чистим номера, за да не остане закачен за
+      // следваща подадена декларация с друг номер.
+      if (field === "stage_submission_done") {
+        if (newValue) {
+          const refNumber = prompt("Номер на подадената декларация:", entry.t.submission_reference_number ?? "");
+          if (refNumber === null) return; // отказано — не маркираме като подадено
+          if (!refNumber.trim()) { showBanner("Номерът на декларацията е задължителен."); return; }
+          update.submission_reference_number = refNumber.trim();
+        } else {
+          update.submission_reference_number = null;
+        }
+      }
+
+      const { error } = await supabase.from("tasks").update(update).eq("id", id);
       if (error) { showBanner("Грешка при запис: " + error.message); return; }
-      entry.t[field] = newValue; // обновяваме локалния кеш, без нова заявка
-      logAudit("task", id, "stage_changed", { field, value: newValue });
+      Object.assign(entry.t, update); // обновяваме локалния кеш, без нова заявка
+      logAudit("task", id, "stage_changed", { field, value: newValue, ...(update.submission_reference_number !== undefined ? { submission_reference_number: update.submission_reference_number } : {}) });
       renderTaskCards(); // презарежда прогрес-таблицата от кеша, без fetch
     });
   });

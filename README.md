@@ -8,24 +8,38 @@
 
 ## Статус
 
-Спецификация ✓, Supabase схема+RLS+seed ✓ (проект `organizer`, EU),
-Auth (3 акаунта) ✓, cron генериране на задачи ✓ (Edge Function, на
-живо като `clever-responder`), известия ✓ (Edge Function, на живо
-като `hyper-service`). Frontend MVP — `index.html` (табло със задачи +
-списък клиенти за admin), готов за преглед, все още недеплойнат.
+Живо на **https://dmehov-max.github.io/organizer/** (GitHub Pages,
+custom domain по избор — все още не е сложен).
 
-Предстои: разпознаване на PDF потвърждения, деплой в GitHub Pages,
-MFA/private storage, Drive интеграция, AI помощник.
+- Supabase схема + RLS + seed данни ✓ (проект `organizer`, EU регион)
+- Auth (admin + счетоводители) + MFA (TOTP) ✓
+- 5 Edge Functions на живо (виж `supabase/README.md` за реалните им
+  случайни имена в Supabase):
+  - `generate-tasks` — дневен cron, генерира задачи + плащания
+  - `send-notifications` — сборни имейл напомняния/ескалации (Resend)
+  - `recognize-confirmation` — разпознаване на PDF потвърждения
+  - `ai-helper` — AI помощник с достъп до контекста на потребителя
+  - `check-drive-files` — проверка за генерирани файлове в Google
+    Drive на фирмата (само наличие/дата, никога съдържание)
+- Frontend (`index.html`, vanilla JS + supabase-js) — табло със
+  задачи, списък клиенти, качване на потвърждения, плащания, досиета,
+  обобщени таблици по задължение с прогрес (Създаване/Проверка/
+  Подаване), филтри/сортиране, AI чат
+- 39+ unit теста (Deno) за чистата логика на функциите
 
-### Как да пробваш `index.html`
+Предстои: custom domain (по избор), допълнителни счетоводители по
+нужда, текущи бъгфиксове и фийчъри по заявка.
 
-**Не го отваряй директно (двоен клик)** — Supabase заявките may fail
-заради `file://` произход (CORS). Или го качи на GitHub Pages (виж
-Прогрес #8), или пусни локален статичен сървър в тази папка, напр.
+### Как да пробваш `index.html` локално
+
+**Не го отваряй директно (двоен клик)** — Supabase заявките може да
+не минат заради `file://` произход (CORS). Или ползвай живия сайт на
+GitHub Pages, или пусни локален статичен сървър в тази папка, напр.
 `npx serve` (изисква Node.js), и отвори адреса, който покаже.
 
 ## Стек
 
-- Frontend: статичен сайт → GitHub Pages (custom domain)
+- Frontend: статичен сайт → GitHub Pages
 - Backend: Supabase (Postgres, Auth, Storage, Edge Functions)
 - Имейли: Resend (през Edge Function)
+- AI: Anthropic API (през `ai-helper` Edge Function)

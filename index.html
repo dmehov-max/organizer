@@ -325,8 +325,8 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
-          <tbody id="clients-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
+          <thead><tr><th>№</th><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -1623,7 +1623,7 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
 
 async function loadClients() {
   const body = document.getElementById("clients-body");
-  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
   populateResponsibleSelect();
 
   const { data, error } = await supabase
@@ -1631,17 +1631,23 @@ async function loadClients() {
     .select("id, name, eik_egn, type, active, responsible_user_id")
     .order("name");
 
-  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма клиенти още.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
+
+  // .order("name") в заявката подрежда по байтове (Postgres default
+  // collation), не винаги вярно азбучно за кирилица — пресортираме
+  // тук с локал-съобразено сравнение, както навсякъде другаде.
+  data.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "bg"));
 
   body.innerHTML = "";
-  for (const c of data) {
+  data.forEach((c, i) => {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
     tr.dataset.id = c.id;
     const masked = maskEgn(c.eik_egn, c.type);
     const isMasked = masked !== c.eik_egn;
     tr.innerHTML = `
+      <td>${i + 1}</td>
       <td>${escapeHtml(c.name)}</td>
       <td>
         <span class="egn-cell">${masked}</span>
@@ -1652,7 +1658,7 @@ async function loadClients() {
       <td>${c.active ? "да" : "не"}</td>
     `;
     body.appendChild(tr);
-  }
+  });
 
   body.querySelectorAll(".reveal-egn").forEach((a) => {
     a.addEventListener("click", (e) => {

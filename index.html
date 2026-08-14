@@ -303,12 +303,12 @@
       <div class="table-wrap" id="progress-table-wrap" style="display:none; overflow-x:auto">
         <table>
           <thead><tr>
-            <th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
+            <th>№</th><th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
             <th>Създаване</th><th>Проверка</th><th>Подаване</th>
           </tr></thead>
           <tbody id="progress-table-body"></tbody>
           <tfoot><tr class="progress-total-row">
-            <td colspan="4">Общ прогрес</td>
+            <td colspan="5">Общ прогрес</td>
             <td id="progress-total-pct"></td>
             <td id="progress-total-creation"></td>
             <td id="progress-total-review"></td>
@@ -1062,7 +1062,7 @@ const STAGE_COLUMNS = [
 function renderProgressTable(sorted) {
   const body = document.getElementById("progress-table-body");
   if (sorted.length === 0) {
-    body.innerHTML = `<tr><td colspan="8" class="empty">Няма задачи по този филтър.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="empty">Няма задачи по този филтър.</td></tr>`;
     document.getElementById("progress-total-pct").textContent = "";
     document.getElementById("progress-total-creation").textContent = "";
     document.getElementById("progress-total-review").textContent = "";
@@ -1077,11 +1077,12 @@ function renderProgressTable(sorted) {
     return `<td class="stage-cell${done ? " stage-done" : ""}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${done ? "✓" : ""}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
   };
 
-  body.innerHTML = sorted.map(({ t }) => {
+  body.innerHTML = sorted.map(({ t }, i) => {
     const doneCount = STAGE_COLUMNS.filter(([field]) => t[field]).length;
     const pct = Math.round((doneCount / STAGE_COLUMNS.length) * 100);
     return `
       <tr data-task-id="${t.id}">
+        <td>${i + 1}</td>
         <td>${escapeHtml(t.clients?.name ?? "?")}</td>
         <td>${maskEgn(t.clients?.eik_egn, t.clients?.type)}</td>
         <td>${escapeHtml(t.period_label)}</td>

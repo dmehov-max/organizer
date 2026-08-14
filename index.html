@@ -298,7 +298,7 @@
       </div>
       <div class="clients-toolbar">
         <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
-        <button id="check-drive-btn">Провери Drive файлове</button>
+        <button id="check-drive-btn" style="display:none">Провери Drive файлове</button>
       </div>
       <div class="table-wrap" id="progress-table-wrap" style="display:none; overflow-x:auto">
         <table>
@@ -1111,8 +1111,19 @@ function renderProgressTable(sorted) {
         if (newValue) {
           const refNumber = prompt("Номер на подадената декларация:", entry.t.submission_reference_number ?? "");
           if (refNumber === null) return; // отказано — не маркираме като подадено
-          if (!refNumber.trim()) { showBanner("Номерът на декларацията е задължителен."); return; }
-          update.submission_reference_number = refNumber.trim();
+          const trimmed = refNumber.trim();
+          if (!trimmed) { showBanner("Номерът на декларацията е задължителен."); return; }
+
+          // Следим за дублиран номер между задачи (обикновено означава
+          // грешка при въвеждане, а не легитимно повторение).
+          const duplicate = currentTasksWithLatest.find(({ t }) =>
+            t.id !== id && t.submission_reference_number === trimmed);
+          if (duplicate) {
+            const dupLabel = `${duplicate.t.clients?.name ?? "?"} (${duplicate.t.period_label})`;
+            if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return;
+          }
+
+          update.submission_reference_number = trimmed;
         } else {
           update.submission_reference_number = null;
         }

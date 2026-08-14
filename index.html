@@ -1128,6 +1128,8 @@ function renderProgressTable(sorted) {
 
           update.submission_reference_number = trimmed;
         } else {
+          if (entry.t.submission_reference_number
+              && !confirm(`Сигурен ли си, че искаш да махнеш подаването с номер ${entry.t.submission_reference_number}?`)) return;
           update.submission_reference_number = null;
         }
       }

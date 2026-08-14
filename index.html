@@ -1118,10 +1118,27 @@ function renderProgressTable(sorted) {
         }
       }
 
+      // Просто правило: и трите отметки → задачата е завършена, за да
+      // се вижда в горното обобщено табло (то брои по tasks.status,
+      // не по отделните отметки).
+      const afterStages = { ...entry.t, ...update };
+      const allStagesDone = STAGE_COLUMNS.every(([f]) => afterStages[f]);
+      if (allStagesDone && entry.t.status !== "completed") {
+        update.status = "completed";
+        update.completed_at = new Date().toISOString();
+        update.completed_by = myProfile.id;
+      } else if (!allStagesDone && entry.t.status === "completed") {
+        update.status = "in_progress";
+        update.completed_at = null;
+        update.completed_by = null;
+      }
+
       const { error } = await supabase.from("tasks").update(update).eq("id", id);
       if (error) { showBanner("Грешка при запис: " + error.message); return; }
       Object.assign(entry.t, update); // обновяваме локалния кеш, без нова заявка
       logAudit("task", id, "stage_changed", { field, value: newValue, ...(update.submission_reference_number !== undefined ? { submission_reference_number: update.submission_reference_number } : {}) });
+      if (update.status) logAudit("task", id, "status_changed", { to: update.status });
+      renderObligationSummary(currentTasksWithLatest); // обнови горното табло веднага
       renderTaskCards(); // презарежда прогрес-таблицата от кеша, без fetch
     });
   });

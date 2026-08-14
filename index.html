@@ -922,10 +922,13 @@ function renderTaskCards() {
     progressWrap.style.display = "none";
   }
 
+  const byClientName = (a, b) => (a.t.clients?.name ?? "").localeCompare(b.t.clients?.name ?? "", "bg");
   const sorted = [...list].sort((a, b) => {
-    if (sortBy === "client") return (a.t.clients?.name ?? "").localeCompare(b.t.clients?.name ?? "", "bg");
+    if (sortBy === "client") return byClientName(a, b);
     if (sortBy === "obligation") return (a.t.obligation_types?.name ?? "").localeCompare(b.t.obligation_types?.name ?? "", "bg");
-    return a.t.due_date.localeCompare(b.t.due_date);
+    // "по срок" — при еднакъв срок (обичайно за повечето фирми) подрежда
+    // фирмите по азбучен ред вместо в произволния ред от заявката.
+    return a.t.due_date.localeCompare(b.t.due_date) || byClientName(a, b);
   });
 
   // "С един поглед" обзор — само когато е филтрирано по конкретно

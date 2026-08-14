@@ -961,6 +961,7 @@ function renderTaskCards() {
         <div class="client">${escapeHtml(t.clients?.name ?? "?")}</div>
         <div class="obl">${escapeHtml(t.obligation_types?.name ?? "?")} · ${escapeHtml(t.period_label)}</div>
         ${latest?.recognized_reference_number ? `<div class="ref">Вх. № ${escapeHtml(latest.recognized_reference_number)}</div>` : ""}
+        ${t.submission_reference_number ? `<div class="ref">№ декларация ${escapeHtml(t.submission_reference_number)}</div>` : ""}
         ${t.files_generated_detected_at ? `<div class="ref">📁 файлове в Drive от ${new Date(t.files_generated_detected_at).toLocaleDateString("bg-BG")}</div>` : ""}
         ${t.drive_detected_vat_amount != null ? `<div class="ref">ДДС ${t.drive_detected_vat_direction === "refund" ? "за възстановяване" : "за внасяне"}: ${t.drive_detected_vat_amount.toFixed(2)} лв. (от Drive, само за справка)</div>` : ""}
       </div>

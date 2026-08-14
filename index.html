@@ -1135,11 +1135,12 @@ function renderProgressTable(sorted) {
         }
       }
 
-      // Просто правило: и трите отметки → задачата е завършена, за да
-      // се вижда в горното обобщено табло (то брои по tasks.status,
-      // не по отделните отметки).
+      // Просто правило: "Подаване" е финалната стъпка — щом декларацията
+      // е подадена, задължението е изпълнено, независимо дали Създаване/
+      // Проверка са отделно отметнати. Това движи горното обобщено табло
+      // (то брои по tasks.status, не по отделните отметки).
       const afterStages = { ...entry.t, ...update };
-      const allStagesDone = STAGE_COLUMNS.every(([f]) => afterStages[f]);
+      const allStagesDone = !!afterStages.stage_submission_done;
       if (allStagesDone && entry.t.status !== "completed") {
         update.status = "completed";
         update.completed_at = new Date().toISOString();

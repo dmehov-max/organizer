@@ -1574,6 +1574,18 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   const responsible = document.getElementById("nc-responsible").value;
   if (!name || !eik) return;
   if (!updateNcEikHint()) { showBanner(`${type === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(type)} цифри.`); return; }
+
+  // Проверка за вече съществуващ клиент (по ЕИК/ЕГН, базата и без това
+  // има уникален индекс — тук е само за по-ясно съобщение, вместо суров
+  // Postgres конфликт) — търси и сред неактивните, за да не се пресъздаде
+  // случайно вече изтрит/архивиран клиент.
+  const { data: existing } = await supabase.from("clients")
+    .select("id, name, active").eq("eik_egn", eik).maybeSingle();
+  if (existing) {
+    showBanner(`Клиент с ${type === "individual" ? "ЕГН" : "ЕИК"} ${eik} вече съществува: ${existing.name}${existing.active ? "" : " (неактивен)"}.`);
+    return;
+  }
+
   const { data: newClient, error } = await supabase.from("clients").insert({
     name, eik_egn: eik, type, responsible_user_id: responsible || null,
   }).select("id").single();

@@ -274,6 +274,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">Задачи</button>
       <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
+      <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">Потребители</button>
     </nav>
 
     <div id="banner-area"></div>
@@ -328,6 +329,15 @@
         <table>
           <thead><tr><th>№</th><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
           <tbody id="clients-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="users-panel" style="display:none">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>№</th><th>Име</th><th>Роля</th><th>Статус</th><th></th></tr></thead>
+          <tbody id="users-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -608,12 +618,23 @@ async function enterApp() {
   appView.style.display = "block";
 
   const { data: profile, error } = await supabase
-    .from("profiles").select("id, full_name, role").eq("id", user.id).single();
+    .from("profiles").select("id, full_name, role, active").eq("id", user.id).single();
   if (error) { showBanner("Не успях да заредя профила: " + error.message); return; }
+
+  if (!profile.active) {
+    // Спрян достъп от admin (виж 0041_deactivate_user_access.sql) —
+    // RLS без активен профил не пуска до никакви данни, но по-ясно е
+    // да излезе веднага с обяснение, вместо да гледа празни таблици.
+    await supabase.auth.signOut();
+    showBanner("Достъпът Ви до Органайзер е спрян от администратор.");
+    showLogin();
+    return;
+  }
   myProfile = profile;
 
   whoLabel.textContent = `${profile.full_name} · ${profile.role === "admin" ? "admin" : "счетоводител"}`;
   document.getElementById("clients-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+  document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
 
   if (profile.role === "admin") {
     const { data: profs } = await supabase.from("profiles").select("id, full_name");
@@ -726,9 +747,54 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     const tab = btn.dataset.tab;
     document.getElementById("tasks-panel").style.display = tab === "tasks" ? "" : "none";
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
+    document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
+    if (tab === "users") loadUsers();
   });
 });
+
+// ---------------- Потребители (само admin) ----------------
+
+async function loadUsers() {
+  const body = document.getElementById("users-body");
+  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, active");
+
+  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма потребители.</td></tr>`; return; }
+
+  data.sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "", "bg"));
+
+  body.innerHTML = "";
+  data.forEach((u, i) => {
+    const isSelf = u.id === myProfile.id;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${escapeHtml(u.full_name)}${isSelf ? " (ти)" : ""}</td>
+      <td>${u.role === "admin" ? "admin" : "счетоводител"}</td>
+      <td>${u.active ? "активен" : "спрян"}</td>
+      <td>${isSelf ? "" : `<button class="user-toggle-btn" data-id="${u.id}" data-active="${u.active}">${u.active ? "Спри достъп" : "Възстанови достъп"}</button>`}</td>
+    `;
+    body.appendChild(tr);
+  });
+
+  body.querySelectorAll(".user-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const willBeActive = btn.dataset.active !== "true";
+      const label = btn.parentElement.parentElement.querySelector("td:nth-child(2)").textContent;
+      if (!willBeActive && !confirm(`Спираш достъпа на ${label} до Органайзер. Продължи?`)) return;
+      const { error } = await supabase.from("profiles").update({ active: willBeActive }).eq("id", id);
+      if (error) { showBanner("Грешка: " + error.message); return; }
+      showBanner(willBeActive ? "Достъпът е възстановен." : "Достъпът е спрян.", "ok");
+      loadUsers();
+    });
+  });
+}
 
 // ---------------- Задачи ----------------
 

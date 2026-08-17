@@ -243,6 +243,22 @@
         <input id="password" type="password" autocomplete="current-password" required /></div>
       <button class="primary" type="submit">Вход</button>
       <div id="login-error"></div>
+      <div style="margin-top:12px; text-align:center">
+        <a class="linklike" id="forgot-password-link">Забравена парола?</a>
+      </div>
+    </form>
+  </div>
+
+  <div id="reset-password-view" style="display:none; max-width:360px; margin:80px auto">
+    <h1>Нова парола</h1>
+    <p class="lede">Въведи нова парола за акаунта си.</p>
+    <form id="reset-password-form">
+      <div class="field"><label for="new-password">Нова парола</label>
+        <input id="new-password" type="password" autocomplete="new-password" minlength="6" required /></div>
+      <div class="field" style="margin-top:12px"><label for="new-password-confirm">Повтори паролата</label>
+        <input id="new-password-confirm" type="password" autocomplete="new-password" minlength="6" required /></div>
+      <button class="primary" type="submit" style="width:100%;margin-top:18px;padding:9px">Запази паролата</button>
+      <div id="reset-password-error" style="color:var(--red);font-size:.85rem;margin-top:10px;min-height:1.2em"></div>
     </form>
   </div>
 
@@ -555,12 +571,52 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
   await supabase.auth.signOut();
 });
 
-supabase.auth.onAuthStateChange((_event, session) => {
+// "Забравена парола?" — праща recovery линк, който Supabase връща
+// към ТОЗИ адрес (каквото и да е — GitHub Pages или локално), а не
+// към default localhost:3000. Изисква Site URL/Redirect URLs в
+// Supabase Auth таблото да включват този адрес, иначе линкът в
+// имейла пак сочи към грешно място (проверено на живо 2026-08-17).
+const resetPasswordView = document.getElementById("reset-password-view");
+const resetPasswordForm = document.getElementById("reset-password-form");
+const resetPasswordError = document.getElementById("reset-password-error");
+
+document.getElementById("forgot-password-link").addEventListener("click", async () => {
+  loginError.textContent = "";
+  const email = document.getElementById("email").value.trim();
+  if (!email) { loginError.textContent = "Въведи имейла си в полето по-горе, после натисни отново."; return; }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
+  loginError.style.color = "var(--accent-ink)";
+  loginError.textContent = error ? "Грешка при пращане на имейла." : "Изпратихме линк за смяна на паролата — провери имейла си.";
+});
+
+resetPasswordForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  resetPasswordError.textContent = "";
+  const pw = document.getElementById("new-password").value;
+  const pw2 = document.getElementById("new-password-confirm").value;
+  if (pw !== pw2) { resetPasswordError.textContent = "Паролите не съвпадат."; return; }
+  const { error } = await supabase.auth.updateUser({ password: pw });
+  if (error) { resetPasswordError.textContent = "Грешка при запазване на паролата."; return; }
+  showBanner("Паролата е сменена успешно.", "ok");
+  checkMfaAndProceed();
+});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === "PASSWORD_RECOVERY") {
+    loginView.style.display = "none";
+    mfaChallengeView.style.display = "none";
+    appView.style.display = "none";
+    resetPasswordView.style.display = "block";
+    return;
+  }
   if (session) checkMfaAndProceed(); else showLogin();
 });
 
 function showLogin() {
   loginView.style.display = "block";
+  resetPasswordView.style.display = "none";
   mfaChallengeView.style.display = "none";
   appView.style.display = "none";
   myProfile = null;
@@ -577,6 +633,7 @@ async function checkMfaAndProceed() {
   if (error) { console.error(error); return enterApp(); }
   if (data.nextLevel === "aal2" && data.currentLevel !== data.nextLevel) {
     loginView.style.display = "none";
+    resetPasswordView.style.display = "none";
     appView.style.display = "none";
     mfaChallengeView.style.display = "block";
     const { data: factors } = await supabase.auth.mfa.listFactors();
@@ -615,6 +672,7 @@ async function enterApp() {
   }
 
   loginView.style.display = "none";
+  resetPasswordView.style.display = "none";
   appView.style.display = "block";
 
   const { data: profile, error } = await supabase

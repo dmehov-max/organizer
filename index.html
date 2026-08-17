@@ -900,6 +900,29 @@ function populateObligationFilter(withLatest) {
   if (names.includes(prevValue)) sel.value = prevValue;
 }
 
+// Изисква номер на подадената декларация при ВСЯКО влизане в
+// "подадено"/"завършено" състояние — не само през прогрес-таблицата.
+// Реален пропуск, докладван на живо: картите (renderTaskCards) не
+// минаваха през тази проверка, само прогрес-таблицата (renderProgressTable),
+// затова задача можеше да стане "Подадена"/"Завършена" без номер.
+// Ако вече има записан номер (напр. зададен през прогрес-таблицата
+// или предходно "Маркирай подадена"), не питаме пак.
+async function ensureSubmissionReference(task) {
+  if (!task) return null;
+  if (task.submission_reference_number) return task.submission_reference_number;
+  const refNumber = prompt("Номер на подадената декларация:", "");
+  if (refNumber === null) return null; // отказано
+  const trimmed = refNumber.trim();
+  if (!trimmed) { showBanner("Номерът на декларацията е задължителен."); return null; }
+  const duplicate = currentTasksWithLatest.find(({ t }) =>
+    t.id !== task.id && t.submission_reference_number === trimmed);
+  if (duplicate) {
+    const dupLabel = `${duplicate.t.clients?.name ?? "?"} (${duplicate.t.period_label})`;
+    if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return null;
+  }
+  return trimmed;
+}
+
 function renderTaskCards() {
   const body = document.getElementById("tasks-body");
   const progressWrap = document.getElementById("progress-table-wrap");
@@ -997,8 +1020,21 @@ function renderTaskCards() {
 
   body.querySelectorAll(".advance-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const update = { status: btn.dataset.next };
+      // "Маркирай подадена" е семантично същото като отметката
+      // "Подаване" в прогрес-таблицата — номерът на декларацията е
+      // задължителен и тук (виж бележката при ensureSubmissionReference).
+      if (btn.dataset.next === "submitted") {
+        const task = currentTasksWithLatest.find(({ t }) => t.id === btn.dataset.id)?.t;
+        const refNumber = await ensureSubmissionReference(task);
+        if (!refNumber) return; // отказано или невалидно — не маркираме
+        Object.assign(update, {
+          submission_reference_number: refNumber,
+          stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
+        });
+      }
       btn.disabled = true;
-      const { error } = await supabase.from("tasks").update({ status: btn.dataset.next }).eq("id", btn.dataset.id);
+      const { error } = await supabase.from("tasks").update(update).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка при промяна: " + error.message); btn.disabled = false; return; }
       logAudit("task", btn.dataset.id, "status_changed", { to: btn.dataset.next });
       showBanner("Обновено.", "ok");
@@ -1036,12 +1072,21 @@ function renderTaskCards() {
         }
       }
 
+      // Номер на декларацията е задължителен и тук — същото правило
+      // като "Подаване" в прогрес-таблицата (виж ensureSubmissionReference).
+      // Ако вече е записан (напр. през прогрес-таблицата или предходно
+      // "Маркирай подадена"), не питаме пак.
+      const refNumber = await ensureSubmissionReference(task);
+      if (!refNumber) return;
+
       // Изрично потвърждение от човек — дори системата да е разпознала
       // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
       if (!confirm("Сигурен ли си, че задачата е завършена?")) return;
       btn.disabled = true;
       const { error } = await supabase.from("tasks").update({
         status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
+        submission_reference_number: refNumber,
+        stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
       }).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
       logAudit("task", btn.dataset.id, "status_changed", { to: "completed" });

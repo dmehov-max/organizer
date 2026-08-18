@@ -278,7 +278,6 @@
       <h1>Органайзер</h1>
       <div>
         <span class="who" id="who-label"></span>
-        <button class="primary" id="open-new-client-btn-header" style="margin-left:10px; display:none">+ Нов клиент</button>
         <button id="mfa-setup-btn" style="margin-left:10px">2FA</button>
         <button id="logout-btn" style="margin-left:10px">Изход</button>
       </div>
@@ -718,14 +717,11 @@ async function enterApp() {
   myProfile = profile;
 
   whoLabel.textContent = `${profile.full_name} · ${profile.role === "admin" ? "admin" : "счетоводител"}`;
-  document.getElementById("clients-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+  // Счетоводител вижда Клиенти таба вече (поискано изрично 2026-08-18)
+  // — RLS (clients_select) ограничава списъка до собствените му
+  // клиенти автоматично, не е нужна отделна проверка тук.
+  document.getElementById("clients-tab-btn").style.display = "";
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
-  // Счетоводител няма Клиенти таб (пълна редакция си остава само за
-  // admin, 0002_rls_policies.sql), но вече МОЖЕ да въвежда нови
-  // клиенти — поискано изрично 2026-08-18 (0042_accountant_client_insert.sql).
-  // Admin вече има същия бутон вътре в Клиенти таба, затова тук само
-  // за не-admin.
-  document.getElementById("open-new-client-btn-header").style.display = profile.role === "admin" ? "none" : "";
 
   if (profile.role === "admin") {
     const { data: profs } = await supabase.from("profiles").select("id, full_name");
@@ -1807,7 +1803,6 @@ function closeNewClientModal() {
 }
 
 document.getElementById("open-new-client-btn").addEventListener("click", openNewClientModal);
-document.getElementById("open-new-client-btn-header").addEventListener("click", openNewClientModal);
 document.getElementById("cancel-new-client-btn").addEventListener("click", closeNewClientModal);
 // Клик върху тъмния фон (не самия модал) затваря — стандартно поведение.
 newClientBackdrop.addEventListener("click", (e) => { if (e.target === newClientBackdrop) closeNewClientModal(); });
@@ -2205,6 +2200,17 @@ async function toggleClientSettings(tr) {
       cb.disabled = false;
     });
   });
+
+  // Счетоводител вижда досието на своя клиент (поискано изрично
+  // 2026-08-18 — "да вижда списъка"), но редакция тук си остава само
+  // за admin (RLS го налага и на ниво база — виж 0002_rls_policies.sql,
+  // само INSERT на нов клиент е отворен, 0042). Без това disable-ване
+  // всяко поле изглежда редактируемо, но save-ът тихо пада с RLS
+  // грешка — заключваме ги видимо вместо да оставим объркваща
+  // "Грешка при запис" при всеки клик.
+  if (myProfile?.role !== "admin") {
+    editClientBackdrop.querySelectorAll("input, select").forEach((el) => { el.disabled = true; });
+  }
 }
 
 // ---------------- AI помощник ----------------

@@ -278,6 +278,7 @@
       <h1>Органайзер</h1>
       <div>
         <span class="who" id="who-label"></span>
+        <button class="primary" id="open-new-client-btn-header" style="margin-left:10px; display:none">+ Нов клиент</button>
         <button id="mfa-setup-btn" style="margin-left:10px">2FA</button>
         <button id="logout-btn" style="margin-left:10px">Изход</button>
       </div>
@@ -418,6 +419,7 @@
               </div>
             </div>
           </div>
+          <div class="form-row"><label for="ec-responsible">Отговорник</label><select id="ec-responsible"></select></div>
           <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
           <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
           <div class="form-row"><label for="ec-tasks-start">Генерирай задачи от</label>
@@ -718,6 +720,12 @@ async function enterApp() {
   whoLabel.textContent = `${profile.full_name} · ${profile.role === "admin" ? "admin" : "счетоводител"}`;
   document.getElementById("clients-tab-btn").style.display = profile.role === "admin" ? "" : "none";
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+  // Счетоводител няма Клиенти таб (пълна редакция си остава само за
+  // admin, 0002_rls_policies.sql), но вече МОЖЕ да въвежда нови
+  // клиенти — поискано изрично 2026-08-18 (0042_accountant_client_insert.sql).
+  // Admin вече има същия бутон вътре в Клиенти таба, затова тук само
+  // за не-admin.
+  document.getElementById("open-new-client-btn-header").style.display = profile.role === "admin" ? "none" : "";
 
   if (profile.role === "admin") {
     const { data: profs } = await supabase.from("profiles").select("id, full_name");
@@ -1799,6 +1807,7 @@ function closeNewClientModal() {
 }
 
 document.getElementById("open-new-client-btn").addEventListener("click", openNewClientModal);
+document.getElementById("open-new-client-btn-header").addEventListener("click", openNewClientModal);
 document.getElementById("cancel-new-client-btn").addEventListener("click", closeNewClientModal);
 // Клик върху тъмния фон (не самия модал) затваря — стандартно поведение.
 newClientBackdrop.addEventListener("click", (e) => { if (e.target === newClientBackdrop) closeNewClientModal(); });
@@ -1827,7 +1836,16 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   const { data: newClient, error } = await supabase.from("clients").insert({
     name, eik_egn: eik, type, responsible_user_id: responsible || null,
   }).select("id").single();
-  if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+  if (error) {
+    // Счетоводител вижда само своите клиенти (RLS) — проверката за
+    // дубликат по-горе не хваща ЕИК, вече зает от чужд клиент, и
+    // тогава удря суровия уникален индекс тук. Даваме по-ясно
+    // съобщение за точно този случай (Postgres код 23505).
+    showBanner(error.code === "23505"
+      ? `${type === "individual" ? "ЕГН" : "ЕИК"} ${eik} вече е зает от друг клиент (нямаш достъп да го видиш кой).`
+      : "Грешка при създаване: " + error.message);
+    return;
+  }
   logAudit("client", newClient.id, "created", { name });
 
   const today = todayISO();
@@ -1975,7 +1993,10 @@ function closeClientEdit() {
 // подреждане "отдолу" изглеждаше разхвърляно).
 async function toggleClientSettings(tr) {
   const clientId = tr.dataset.id;
-  const clientName = tr.children[0].textContent;
+  // tr.children[0] е "№" колоната (добавена в 1b6c95c) — Име е сега
+  // на индекс 1, не 0. Реален бъг, открит на живо 2026-08-18: записът
+  // по-долу презаписваше "№" клетката с името на клиента.
+  const clientName = tr.children[1].textContent;
   document.getElementById("edit-client-title").textContent = clientName;
   editClientBackdrop.classList.add("open");
 
@@ -2013,7 +2034,33 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id").eq("id", clientId).single();
+
+  // Смяна на отговорника — поискано изрично (2026-08-18), за да може
+  // admin да прехвърля клиенти между счетоводители от досието, вместо
+  // само през SQL. Само admin стига дотук (Клиенти табът е admin-only),
+  // но и RLS (clients_admin_update) го налага и на ниво база.
+  const respSel = document.getElementById("ec-responsible");
+  respSel.innerHTML = Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
+  respSel.value = clientRow?.responsible_user_id ?? "";
+  respSel.onchange = async () => {
+    respSel.disabled = true;
+    const { error } = await supabase.from("clients")
+      .update({ responsible_user_id: respSel.value || null }).eq("id", clientId);
+    respSel.disabled = false;
+    if (error) { showBanner("Грешка при запис: " + error.message); return; }
+    logAudit("client", clientId, "responsible_changed", { responsible_user_id: respSel.value });
+    // Прехвърля и текущо-отворените задачи към новия отговорник — иначе
+    // клиентското поле сменя, но старите задачи остават закачени за
+    // предишния човек до следващото generate-tasks генериране (объркващо
+    // за двамата). Завършените НЕ се пипат — те си остават под този,
+    // който реално ги е свършил (одит следа).
+    await supabase.from("tasks").update({ assigned_user_id: respSel.value || null })
+      .eq("client_id", clientId).neq("status", "completed");
+    tr.children[4].textContent = usersById[respSel.value] ?? "—";
+    showBanner("Отговорникът е сменен.", "ok");
+    loadTasks();
+  };
   const activeCb = document.getElementById("active-cb-panel");
   activeCb.checked = !!clientRow?.active;
   activeCb.onchange = async () => {
@@ -2024,7 +2071,7 @@ async function toggleClientSettings(tr) {
       activeCb.checked = !activeCb.checked;
     } else {
       logAudit("client", clientId, "active_changed", { active: activeCb.checked });
-      tr.children[4].textContent = activeCb.checked ? "да" : "не";
+      tr.children[5].textContent = activeCb.checked ? "да" : "не"; // Активен, не Отговорник (виж бележката горе)
       showBanner("Обновено.", "ok");
     }
     activeCb.disabled = false;
@@ -2057,8 +2104,8 @@ async function toggleClientSettings(tr) {
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
-    tr.children[0].textContent = name;
-    const egnCell = tr.children[1].querySelector(".egn-cell");
+    tr.children[1].textContent = name; // Име, не "№" (виж бележката в toggleClientSettings)
+    const egnCell = tr.children[2].querySelector(".egn-cell");
     if (egnCell) egnCell.textContent = maskEgn(eik, clientRow?.type);
   };
   // .onblur (не addEventListener) — тази функция се вика при всяко

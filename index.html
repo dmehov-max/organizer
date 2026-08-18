@@ -317,6 +317,7 @@
         <button class="primary" id="open-new-event-task-btn">+ Задача по събитие</button>
         <button id="check-drive-btn" style="display:none">Провери Drive файлове</button>
       </div>
+      <h3 id="progress-table-title" style="display:none; margin:0 0 8px"></h3>
       <div class="table-wrap" id="progress-table-wrap" style="display:none; overflow-x:auto">
         <table>
           <thead><tr>
@@ -1094,12 +1095,16 @@ function renderTaskCards() {
   // Controlisy) се показва вместо картите, само когато е избрано
   // конкретно задължение — иначе "прогрес" за разнородни задължения
   // едновременно не значи нищо смислено. Поискано изрично.
+  const progressTitle = document.getElementById("progress-table-title");
   if (obligationFilter) {
     body.style.display = "none";
     progressWrap.style.display = "";
+    progressTitle.style.display = "";
+    progressTitle.textContent = obligationFilter;
   } else {
     body.style.display = "";
     progressWrap.style.display = "none";
+    progressTitle.style.display = "none";
   }
 
   const byClientName = (a, b) => (a.t.clients?.name ?? "").localeCompare(b.t.clients?.name ?? "", "bg");

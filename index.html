@@ -598,17 +598,37 @@ resetPasswordForm.addEventListener("submit", async (e) => {
   const pw2 = document.getElementById("new-password-confirm").value;
   if (pw !== pw2) { resetPasswordError.textContent = "Паролите не съвпадат."; return; }
   const { error } = await supabase.auth.updateUser({ password: pw });
-  if (error) { resetPasswordError.textContent = "Грешка при запазване на паролата."; return; }
+  // Показваме истинското съобщение на Supabase, не generic текст —
+  // реален случай, открит на живо: акаунт с вече включено 2FA гърми
+  // тук с "AAL2 required", защото recovery линкът дава сесия само на
+  // ниво AAL1 (виж клона по-долу, който сега пита за 2FA кода first).
+  if (error) { resetPasswordError.textContent = error.message; return; }
   showBanner("Паролата е сменена успешно.", "ok");
   checkMfaAndProceed();
 });
 
-supabase.auth.onAuthStateChange((event, session) => {
+// Ако акаунтът вече има включено 2FA, recovery линкът дава сесия само
+// на AAL1 — supabase.auth.updateUser({password}) отказва с "AAL2
+// required" на такава сесия. Затова тук минаваме първо през 2FA
+// предизвикателство (същия екран като нормалния вход), и чак след
+// това показваме формата за нова парола.
+let pendingAfterMfa = null; // "resetPassword" | null
+
+supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === "PASSWORD_RECOVERY") {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     loginView.style.display = "none";
-    mfaChallengeView.style.display = "none";
     appView.style.display = "none";
-    resetPasswordView.style.display = "block";
+    if (!error && data.nextLevel === "aal2" && data.currentLevel !== data.nextLevel) {
+      resetPasswordView.style.display = "none";
+      mfaChallengeView.style.display = "block";
+      pendingAfterMfa = "resetPassword";
+      const { data: factors } = await supabase.auth.mfa.listFactors();
+      pendingMfaFactorId = factors?.totp?.[0]?.id ?? null;
+    } else {
+      mfaChallengeView.style.display = "none";
+      resetPasswordView.style.display = "block";
+    }
     return;
   }
   if (session) checkMfaAndProceed(); else showLogin();
@@ -655,6 +675,11 @@ mfaChallengeForm.addEventListener("submit", async (e) => {
   });
   if (vErr) { mfaChallengeError.textContent = "Грешен код. Пробвай пак."; return; }
   mfaChallengeView.style.display = "none";
+  if (pendingAfterMfa === "resetPassword") {
+    pendingAfterMfa = null;
+    resetPasswordView.style.display = "block";
+    return;
+  }
   enterApp();
 });
 

@@ -718,17 +718,15 @@ async function enterApp() {
 
   whoLabel.textContent = `${profile.full_name} · ${profile.role === "admin" ? "admin" : "счетоводител"}`;
   // Счетоводител вижда Клиенти таба вече (поискано изрично 2026-08-18)
-  // — RLS (clients_select) ограничава списъка до собствените му
-  // клиенти автоматично, не е нужна отделна проверка тук.
+  // — виждат се ВСИЧКИ клиенти, не само собствените (0043 разшири
+  // clients_select), затова usersById вече се пълни изцяло за всеки,
+  // не само за admin — иначе "Отговорник" колоната показваше "—" за
+  // клиенти на друг счетоводител (profiles_select също разширена в 0043).
   document.getElementById("clients-tab-btn").style.display = "";
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
 
-  if (profile.role === "admin") {
-    const { data: profs } = await supabase.from("profiles").select("id, full_name");
-    usersById = Object.fromEntries((profs ?? []).map((p) => [p.id, p.full_name]));
-  } else {
-    usersById = { [profile.id]: profile.full_name };
-  }
+  const { data: profs } = await supabase.from("profiles").select("id, full_name");
+  usersById = Object.fromEntries((profs ?? []).map((p) => [p.id, p.full_name]));
 
   loadTasks();
   refreshMfaSetupStatus({ autoPrompt: true });
@@ -1713,7 +1711,14 @@ function maskEgn(egn, type) {
 function populateResponsibleSelect() {
   const sel = document.getElementById("nc-responsible");
   if (!sel) return;
-  sel.innerHTML = Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
+  // usersById вече съдържа всички (0043 разшири profiles_select), но
+  // счетоводител може да въвежда клиент само на себе си (0042 RLS
+  // check) — ограничаваме падащото меню до неговото име, за да не
+  // избере друг и да удари RLS грешка при запис.
+  const options = myProfile?.role === "admin"
+    ? Object.entries(usersById)
+    : [[myProfile.id, myProfile.full_name]];
+  sel.innerHTML = options.map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
 }
 
 const newClientBackdrop = document.getElementById("new-client-backdrop");

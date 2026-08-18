@@ -290,6 +290,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">Задачи</button>
       <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
+      <button class="tab" data-tab="bookkeeping" id="bookkeeping-tab-btn">Осчетоводяване</button>
       <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">Потребители</button>
     </nav>
 
@@ -349,6 +350,41 @@
         </table>
       </div>
     </section>
+
+    <section id="bookkeeping-panel" style="display:none">
+      <div class="filter-toolbar">
+        <label for="bk-year-filter" style="margin:0; text-transform:none; font-weight:400; color:var(--muted); font-size:.85rem">Година:</label>
+        <select id="bk-year-filter"></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>№</th><th>Фирма</th><th>ЕИК/ЕГН</th>
+            <th>Приходи</th><th>Разходи</th><th>Заплати</th><th>Банка</th>
+          </tr></thead>
+          <tbody id="bookkeeping-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="modal-backdrop" id="bookkeeping-detail-backdrop">
+      <div class="modal modal-wide">
+        <h2 id="bookkeeping-detail-title">Осчетоводяване</h2>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table style="min-width:720px">
+            <thead><tr>
+              <th></th>
+              <th>Яну</th><th>Фев</th><th>Мар</th><th>Апр</th><th>Май</th><th>Юни</th>
+              <th>Юли</th><th>Авг</th><th>Сеп</th><th>Окт</th><th>Ное</th><th>Дек</th>
+            </tr></thead>
+            <tbody id="bookkeeping-detail-body"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="close-bookkeeping-detail-btn">Затвори</button>
+        </div>
+      </div>
+    </div>
 
     <section id="users-panel" style="display:none">
       <div class="table-wrap">
@@ -833,8 +869,10 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     const tab = btn.dataset.tab;
     document.getElementById("tasks-panel").style.display = tab === "tasks" ? "" : "none";
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
+    document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
+    if (tab === "bookkeeping") loadBookkeepingSummary();
     if (tab === "users") loadUsers();
   });
 });
@@ -2209,6 +2247,125 @@ async function toggleClientSettings(tr) {
       if (error) showBanner("Грешка: " + error.message);
       else logAudit("client", clientId, "obligation_setting_changed", { obligation_type_id: cb.dataset.oid, enabled: cb.checked });
       cb.disabled = false;
+    });
+  });
+}
+
+// ---------------- Осчетоводяване ----------------
+// Отделно от задачите (obligation_types/tasks) — тук няма нормативен
+// срок, номер на декларация или крон генериране. Просто чекбокс "този
+// месец/категория е обработен(а)" на фирма. Ред в bookkeeping_progress
+// съществува само когато е чекнато (uncheck = delete реда), затова
+// "готово до месец N" се извежда като най-високия чекнат месец, не се
+// пази отделно поле за това.
+
+const BK_CATEGORIES = [
+  ["revenue", "Приходи"],
+  ["expense", "Разходи"],
+  ["salaries", "Заплати"],
+  ["bank", "Банка"],
+];
+const MONTH_LABELS = ["Яну", "Фев", "Мар", "Апр", "Май", "Юни", "Юли", "Авг", "Сеп", "Окт", "Ное", "Дек"];
+
+function bkYearOptions() {
+  const sel = document.getElementById("bk-year-filter");
+  if (sel.options.length) return; // веднъж е достатъчно, стойността се пази между табовете
+  const current = new Date().getFullYear();
+  for (let y = current + 1; y >= current - 2; y--) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    if (y === current) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadBookkeepingSummary() {
+  bkYearOptions();
+  const year = Number(document.getElementById("bk-year-filter").value);
+  const body = document.getElementById("bookkeeping-body");
+  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+
+  // RLS (0048) вече ограничава до собствените клиенти за счетоводител,
+  // всички за admin — същия модел като clients в момента.
+  const { data: clients, error: cErr } = await supabase
+    .from("clients").select("id, name, eik_egn, type").eq("active", true);
+  if (cErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${cErr.message}</td></tr>`; return; }
+  const sorted = [...(clients ?? [])].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "bg"));
+
+  const { data: progress, error: pErr } = await supabase
+    .from("bookkeeping_progress").select("client_id, category, month").eq("year", year);
+  if (pErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${pErr.message}</td></tr>`; return; }
+
+  if (sorted.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти.</td></tr>`; return; }
+
+  body.innerHTML = sorted.map((c, i) => {
+    const cells = BK_CATEGORIES.map(([code]) => {
+      const months = (progress ?? []).filter((p) => p.client_id === c.id && p.category === code).map((p) => p.month);
+      const lastMonth = months.length ? Math.max(...months) : null;
+      return `<td>${lastMonth ? `до ${MONTH_LABELS[lastMonth - 1]}` : `<span style="color:var(--muted)">—</span>`}</td>`;
+    }).join("");
+    return `<tr class="clickable-row" data-id="${c.id}" data-name="${escapeHtml(c.name)}">
+      <td>${i + 1}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${maskEgn(c.eik_egn, c.type)}</td>
+      ${cells}
+    </tr>`;
+  }).join("");
+
+  body.querySelectorAll("tr.clickable-row").forEach((tr) => {
+    tr.addEventListener("click", () => openBookkeepingDetail(tr.dataset.id, tr.dataset.name));
+  });
+}
+
+document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
+
+const bookkeepingDetailBackdrop = document.getElementById("bookkeeping-detail-backdrop");
+document.getElementById("close-bookkeeping-detail-btn").addEventListener("click", () => bookkeepingDetailBackdrop.classList.remove("open"));
+bookkeepingDetailBackdrop.addEventListener("click", (e) => { if (e.target === bookkeepingDetailBackdrop) bookkeepingDetailBackdrop.classList.remove("open"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && bookkeepingDetailBackdrop.classList.contains("open")) bookkeepingDetailBackdrop.classList.remove("open"); });
+
+async function openBookkeepingDetail(clientId, clientName) {
+  document.getElementById("bookkeeping-detail-title").textContent = clientName;
+  bookkeepingDetailBackdrop.classList.add("open");
+  const year = Number(document.getElementById("bk-year-filter").value);
+
+  const body = document.getElementById("bookkeeping-detail-body");
+  body.innerHTML = `<tr><td colspan="13" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase
+    .from("bookkeeping_progress").select("category, month").eq("client_id", clientId).eq("year", year);
+  if (error) { body.innerHTML = `<tr><td colspan="13" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  const doneSet = new Set((data ?? []).map((r) => `${r.category}-${r.month}`));
+
+  body.innerHTML = BK_CATEGORIES.map(([code, label]) => {
+    const cells = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const isDone = doneSet.has(`${code}-${m}`);
+      return `<td class="stage-cell${isDone ? " stage-done" : ""}" data-month="${m}" data-category="${code}" style="cursor:pointer;text-align:center">${isDone ? "✓" : ""}</td>`;
+    }).join("");
+    return `<tr><td style="font-weight:600">${label}</td>${cells}</tr>`;
+  }).join("");
+
+  body.querySelectorAll("td.stage-cell").forEach((cell) => {
+    cell.addEventListener("click", async () => {
+      const month = Number(cell.dataset.month);
+      const category = cell.dataset.category;
+      const isDone = cell.classList.contains("stage-done");
+      if (isDone) {
+        const { error } = await supabase.from("bookkeeping_progress")
+          .delete().eq("client_id", clientId).eq("year", year).eq("category", category).eq("month", month);
+        if (error) { showBanner("Грешка: " + error.message); return; }
+        cell.classList.remove("stage-done");
+        cell.textContent = "";
+      } else {
+        const { error } = await supabase.from("bookkeeping_progress")
+          .insert({ client_id: clientId, year, category, month, done_by: myProfile.id });
+        if (error) { showBanner("Грешка: " + error.message); return; }
+        cell.classList.add("stage-done");
+        cell.textContent = "✓";
+      }
+      loadBookkeepingSummary(); // обновява "до кой месец" в справката отзад
     });
   });
 }

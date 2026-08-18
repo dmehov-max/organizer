@@ -1031,18 +1031,22 @@ function populateObligationFilter(withLatest) {
 // затова задача можеше да стане "Подадена"/"Завършена" без номер.
 // Ако вече има записан номер (напр. зададен през прогрес-таблицата
 // или предходно "Маркирай подадена"), не питаме пак.
+// Връща `undefined` само ако човекът натисне Cancel на prompt-а (спираме
+// маркирането) — празно поле вече Е валиден отговор (номерът е по избор,
+// не задължителен, виж коментара по-долу), затова "" се различава от
+// `undefined` и НЕ спира изпълнението (за разлика от старото поведение).
 async function ensureSubmissionReference(task) {
-  if (!task) return null;
+  if (!task) return undefined;
   if (task.submission_reference_number) return task.submission_reference_number;
-  const refNumber = prompt("Номер на подадената декларация:", "");
-  if (refNumber === null) return null; // отказано
+  const refNumber = prompt("Номер на подадената декларация (по избор):", "");
+  if (refNumber === null) return undefined; // отказано
   const trimmed = refNumber.trim();
-  if (!trimmed) { showBanner("Номерът на декларацията е задължителен."); return null; }
+  if (!trimmed) return ""; // изрично без номер — разрешено
   const duplicate = currentTasksWithLatest.find(({ t }) =>
     t.id !== task.id && t.submission_reference_number === trimmed);
   if (duplicate) {
     const dupLabel = `${duplicate.t.clients?.name ?? "?"} (${duplicate.t.period_label})`;
-    if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return null;
+    if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return undefined;
   }
   return trimmed;
 }
@@ -1147,13 +1151,13 @@ function renderTaskCards() {
       const update = { status: btn.dataset.next };
       // "Маркирай подадена" е семантично същото като отметката
       // "Подаване" в прогрес-таблицата — номерът на декларацията е
-      // задължителен и тук (виж бележката при ensureSubmissionReference).
+      // по избор и тук (виж бележката при ensureSubmissionReference).
       if (btn.dataset.next === "submitted") {
         const task = currentTasksWithLatest.find(({ t }) => t.id === btn.dataset.id)?.t;
         const refNumber = await ensureSubmissionReference(task);
-        if (!refNumber) return; // отказано или невалидно — не маркираме
+        if (refNumber === undefined) return; // отказано — не маркираме
         Object.assign(update, {
-          submission_reference_number: refNumber,
+          submission_reference_number: refNumber || null,
           stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
         });
       }
@@ -1196,12 +1200,12 @@ function renderTaskCards() {
         }
       }
 
-      // Номер на декларацията е задължителен и тук — същото правило
+      // Номер на декларацията е по избор и тук — същото правило
       // като "Подаване" в прогрес-таблицата (виж ensureSubmissionReference).
       // Ако вече е записан (напр. през прогрес-таблицата или предходно
       // "Маркирай подадена"), не питаме пак.
       const refNumber = await ensureSubmissionReference(task);
-      if (!refNumber) return;
+      if (refNumber === undefined) return;
 
       // Изрично потвърждение от човек — дори системата да е разпознала
       // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
@@ -1209,7 +1213,7 @@ function renderTaskCards() {
       btn.disabled = true;
       const { error } = await supabase.from("tasks").update({
         status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
-        submission_reference_number: refNumber,
+        submission_reference_number: refNumber || null,
         stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
       }).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
@@ -1319,28 +1323,29 @@ function renderProgressTable(sorted) {
       const newValue = !entry.t[field];
       const update = { [field]: newValue };
 
-      // При отбелязване на "Подаване" номерът на декларацията е
-      // задължителен (поискано изрично) — предварително попълнен с
-      // вече записания, ако маркираш обратно след отмятане. При
+      // При отбелязване на "Подаване" номерът на декларацията е по
+      // избор (искането за задължителен номер е отменено 2026-08-18
+      // — блокираше реални случаи без номер) — предварително попълнен
+      // с вече записания, ако маркираш обратно след отмятане. При
       // разотметка чистим номера, за да не остане закачен за
       // следваща подадена декларация с друг номер.
       if (field === "stage_submission_done") {
         if (newValue) {
-          const refNumber = prompt("Номер на подадената декларация:", entry.t.submission_reference_number ?? "");
+          const refNumber = prompt("Номер на подадената декларация (по избор):", entry.t.submission_reference_number ?? "");
           if (refNumber === null) return; // отказано — не маркираме като подадено
           const trimmed = refNumber.trim();
-          if (!trimmed) { showBanner("Номерът на декларацията е задължителен."); return; }
 
           // Следим за дублиран номер между задачи (обикновено означава
-          // грешка при въвеждане, а не легитимно повторение).
-          const duplicate = currentTasksWithLatest.find(({ t }) =>
+          // грешка при въвеждане, а не легитимно повторение) — само
+          // ако изобщо е въведен номер.
+          const duplicate = trimmed && currentTasksWithLatest.find(({ t }) =>
             t.id !== id && t.submission_reference_number === trimmed);
           if (duplicate) {
             const dupLabel = `${duplicate.t.clients?.name ?? "?"} (${duplicate.t.period_label})`;
             if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return;
           }
 
-          update.submission_reference_number = trimmed;
+          update.submission_reference_number = trimmed || null;
         } else {
           if (entry.t.submission_reference_number
               && !confirm(`Сигурен ли си, че искаш да махнеш подаването с номер ${entry.t.submission_reference_number}?`)) return;

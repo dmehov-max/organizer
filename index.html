@@ -587,8 +587,8 @@ document.getElementById("forgot-password-link").addEventListener("click", async 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: window.location.origin + window.location.pathname,
   });
-  loginError.style.color = "var(--accent-ink)";
-  loginError.textContent = error ? "Грешка при пращане на имейла." : "Изпратихме линк за смяна на паролата — провери имейла си.";
+  loginError.style.color = error ? "var(--red)" : "var(--accent-ink)";
+  loginError.textContent = error ? error.message : "Изпратихме линк за смяна на паролата — провери имейла си.";
 });
 
 resetPasswordForm.addEventListener("submit", async (e) => {

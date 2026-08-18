@@ -1,9 +1,0 @@
-{'id': '8d96f749-ed50-48ee-9d09-acebcd2a7668', 'name': 'Декл. обр. 6', 'applies_to_dossier_flag': 'td', 'applies_to_registration_type_id': None, 'applies_to_all_legal_entities': False}
-{'id': '0d5d6d15-fd0e-45ce-a4e6-c848a44aa6a9', 'name': 'Декл. обр. 1', 'applies_to_dossier_flag': 'td', 'applies_to_registration_type_id': None, 'applies_to_all_legal_entities': False}
-
-ЕМ ВИ ЕМ - О ЕООД legal_entity flags: [] regs: [{'registration_type_id': 'a5a85d94-42ae-44e5-880f-d6f18face622'}]
-МЕЙЛТЕМИ ЕООД legal_entity flags: [{'flag': 'sol', 'started_on': '2026-08-18'}] regs: []
-ДИ ЕН ДИ 2021 ЕООД legal_entity flags: [{'flag': 'sol', 'started_on': '2026-08-18'}] regs: []
-Скрийн бокс ООД legal_entity flags: [{'flag': 'gd', 'started_on': '2026-08-09'}] regs: [{'registration_type_id': 'a5a85d94-42ae-44e5-880f-d6f18face622'}]
-КОРЕКТ МУВЪРС ЕООД legal_entity flags: [] regs: []
-СМАРТ ЪП ЕООД legal_entity flags: [{'flag': 'gd', 'started_on': '2026-08-14'}] regs: [{'registration_type_id': 'a5a85d94-42ae-44e5-880f-d6f18face622'}]

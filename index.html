@@ -2036,10 +2036,11 @@ async function toggleClientSettings(tr) {
   const { data: clientRow } = await supabase.from("clients")
     .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id").eq("id", clientId).single();
 
-  // Смяна на отговорника — поискано изрично (2026-08-18), за да може
-  // admin да прехвърля клиенти между счетоводители от досието, вместо
-  // само през SQL. Само admin стига дотук (Клиенти табът е admin-only),
-  // но и RLS (clients_admin_update) го налага и на ниво база.
+  // Смяна на отговорника — поискано изрично (2026-08-18). Отначало
+  // само admin можеше да редактира тук; същия ден по-късно е
+  // отворено и за счетоводители (0044_accountant_edit_clients.sql) —
+  // всеки активен потребител вижда всички клиенти и може да ги
+  // редактира, включително да им сменя отговорника.
   const respSel = document.getElementById("ec-responsible");
   respSel.innerHTML = Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
   respSel.value = clientRow?.responsible_user_id ?? "";
@@ -2205,17 +2206,6 @@ async function toggleClientSettings(tr) {
       cb.disabled = false;
     });
   });
-
-  // Счетоводител вижда досието на своя клиент (поискано изрично
-  // 2026-08-18 — "да вижда списъка"), но редакция тук си остава само
-  // за admin (RLS го налага и на ниво база — виж 0002_rls_policies.sql,
-  // само INSERT на нов клиент е отворен, 0042). Без това disable-ване
-  // всяко поле изглежда редактируемо, но save-ът тихо пада с RLS
-  // грешка — заключваме ги видимо вместо да оставим объркваща
-  // "Грешка при запис" при всеки клик.
-  if (myProfile?.role !== "admin") {
-    editClientBackdrop.querySelectorAll("input, select").forEach((el) => { el.disabled = true; });
-  }
 }
 
 // ---------------- AI помощник ----------------

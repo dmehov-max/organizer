@@ -314,6 +314,7 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">Задачи</button>
+      <button class="tab" data-tab="inspections" id="inspections-tab-btn">Проверки и ревизии</button>
       <button class="tab" data-tab="bookkeeping" id="bookkeeping-tab-btn">Осчетоводяване</button>
       <span class="tab-divider"></span>
       <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
@@ -376,6 +377,43 @@
         </table>
       </div>
     </section>
+
+    <section id="inspections-panel" style="display:none">
+      <div class="clients-toolbar">
+        <button class="primary" id="open-new-inspection-btn">+ Нова проверка/ревизия</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>№</th><th>Фирма</th><th>Тип</th><th>Заглавие</th><th>Срок</th><th>Статус</th><th>Документ</th><th></th>
+          </tr></thead>
+          <tbody id="inspections-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="modal-backdrop" id="new-inspection-backdrop">
+      <div class="modal">
+        <h2>Нова проверка/ревизия</h2>
+        <form id="new-inspection-form">
+          <div class="form-table">
+            <div class="form-row"><label for="ni-client">Клиент</label><select id="ni-client" required></select></div>
+            <div class="form-row"><label for="ni-kind">Тип</label>
+              <select id="ni-kind">
+                <option value="inspection">Проверка</option>
+                <option value="audit">Ревизия</option>
+              </select></div>
+            <div class="form-row"><label for="ni-title">Заглавие</label><input id="ni-title" required placeholder="напр. Насрещна проверка по ЗДДС" /></div>
+            <div class="form-row"><label for="ni-due-date">Срок</label><input id="ni-due-date" type="date" /></div>
+            <div class="form-row" style="align-items:start"><label for="ni-file" style="margin-top:8px">PDF</label><input id="ni-file" type="file" accept="application/pdf" /></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cancel-new-inspection-btn">Отказ</button>
+            <button class="primary" type="submit">Създай</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <section id="bookkeeping-panel" style="display:none">
       <div class="filter-toolbar">
@@ -936,9 +974,11 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     const tab = btn.dataset.tab;
     document.getElementById("tasks-panel").style.display = tab === "tasks" ? "" : "none";
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
+    document.getElementById("inspections-panel").style.display = tab === "inspections" ? "" : "none";
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
+    if (tab === "inspections") loadInspections();
     if (tab === "bookkeeping") { loadBookkeepingSummary(); loadBkTimeReport(); loadTaskTimeReport(); }
     if (tab === "users") loadUsers();
   });
@@ -2741,6 +2781,111 @@ async function loadTaskTimeReport() {
     </tr>
   `).join("");
 }
+
+// ---------------- Проверки и ревизии ----------------
+// Отделен модул от периодичните задължения — еднократно събитие
+// (проверка/ревизия от НАП и др.) за клиент, със срок и прикачен PDF.
+// Достъп следва клиентската собственост (is_client_owner), както
+// клиентите/досието/Осчетоводяване — не и през задачите (tasks).
+
+const INSPECTION_KIND_LABELS = { inspection: "Проверка", audit: "Ревизия" };
+
+async function loadInspections() {
+  const body = document.getElementById("inspections-body");
+  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase.from("inspections")
+    .select("id, kind, title, due_date, status, storage_path, clients(name)")
+    .order("due_date", { ascending: true, nullsFirst: false });
+  if (error) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма проверки/ревизии още.</td></tr>`; return; }
+
+  body.innerHTML = data.map((insp, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(insp.clients?.name ?? "?")}</td>
+      <td>${INSPECTION_KIND_LABELS[insp.kind] ?? insp.kind}</td>
+      <td>${escapeHtml(insp.title)}</td>
+      <td>${insp.due_date ? formatDateBg(insp.due_date) : "—"}</td>
+      <td><span class="pill pill-${insp.status === "closed" ? "completed" : "waiting"}">${insp.status === "closed" ? "Приключена" : "Открита"}</span></td>
+      <td>${insp.storage_path ? `<a class="linklike insp-view-btn" data-path="${escapeHtml(insp.storage_path)}">Виж PDF</a>` : `<span style="color:var(--muted)">—</span>`}</td>
+      <td><button class="small insp-toggle-btn" data-id="${insp.id}" data-status="${insp.status}">${insp.status === "closed" ? "Отвори пак" : "Приключи"}</button></td>
+    </tr>
+  `).join("");
+
+  body.querySelectorAll(".insp-view-btn").forEach((a) => {
+    a.addEventListener("click", async () => {
+      const { data: signed, error: sErr } = await supabase.storage
+        .from("inspections").createSignedUrl(a.dataset.path, 3600);
+      if (sErr) { showBanner("Грешка при отваряне на файла: " + sErr.message); return; }
+      window.open(signed.signedUrl, "_blank");
+    });
+  });
+
+  body.querySelectorAll(".insp-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const newStatus = btn.dataset.status === "closed" ? "open" : "closed";
+      btn.disabled = true;
+      const { error } = await supabase.from("inspections").update({ status: newStatus }).eq("id", btn.dataset.id);
+      if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
+      logAudit("inspection", btn.dataset.id, "status_changed", { to: newStatus });
+      loadInspections();
+    });
+  });
+}
+
+const newInspectionBackdrop = document.getElementById("new-inspection-backdrop");
+
+async function openNewInspectionModal() {
+  const sel = document.getElementById("ni-client");
+  // Клиентският достъп е стеснен обратно до собствените (0047) — тук
+  // просто презползваме RLS-а на clients, не му трябва отделна логика.
+  const { data: clients } = await supabase.from("clients").select("id, name").eq("active", true);
+  const sorted = [...(clients ?? [])].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "bg"));
+  sel.innerHTML = sorted.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+  newInspectionBackdrop.classList.add("open");
+  document.getElementById("ni-title").focus();
+}
+function closeNewInspectionModal() {
+  newInspectionBackdrop.classList.remove("open");
+  document.getElementById("new-inspection-form").reset();
+}
+document.getElementById("open-new-inspection-btn").addEventListener("click", openNewInspectionModal);
+document.getElementById("cancel-new-inspection-btn").addEventListener("click", closeNewInspectionModal);
+newInspectionBackdrop.addEventListener("click", (e) => { if (e.target === newInspectionBackdrop) closeNewInspectionModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && newInspectionBackdrop.classList.contains("open")) closeNewInspectionModal(); });
+
+document.getElementById("new-inspection-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const clientId = document.getElementById("ni-client").value;
+  const kind = document.getElementById("ni-kind").value;
+  const title = document.getElementById("ni-title").value.trim();
+  const dueDate = document.getElementById("ni-due-date").value;
+  const file = document.getElementById("ni-file").files[0];
+  if (!clientId || !title) return;
+
+  let storagePath = null;
+  if (file) {
+    // Същата конвенция за път като attachments (0003) — без
+    // кирилица/интервали в ключа, оригиналното име остава само във
+    // файла, не в пътя.
+    const extMatch = file.name.match(/\.[a-zA-Z0-9]+$/);
+    const path = `${clientId}/${Date.now()}${extMatch ? extMatch[0] : ""}`;
+    const { error: upErr } = await supabase.storage.from("inspections").upload(path, file);
+    if (upErr) { showBanner("Грешка при качване на файла: " + upErr.message); return; }
+    storagePath = path;
+  }
+
+  const { data: newInsp, error } = await supabase.from("inspections").insert({
+    client_id: clientId, kind, title, due_date: dueDate || null,
+    storage_path: storagePath, created_by: myProfile.id,
+  }).select("id").single();
+  if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+  logAudit("inspection", newInsp.id, "created", { title });
+  closeNewInspectionModal();
+  showBanner("Проверката/ревизията е добавена.", "ok");
+  loadInspections();
+});
 
 // ---------------- AI помощник ----------------
 

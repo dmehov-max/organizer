@@ -392,6 +392,9 @@
     </section>
 
     <section id="clients-panel" style="display:none">
+      <div class="filter-toolbar">
+        <select id="clients-responsible-filter"><option value="">Всички отговорници</option></select>
+      </div>
       <div class="clients-toolbar">
         <button class="primary" id="open-new-client-btn">+ Нов клиент</button>
       </div>
@@ -1158,13 +1161,13 @@ async function loadTasks() {
 
   currentTasksWithLatest = withLatest;
   populateObligationFilter(withLatest);
-  populateResponsibleFilter();
+  populateResponsibleFilter("responsible-filter");
   renderObligationSummary(withLatest);
   renderTaskCards();
 }
 
-function populateResponsibleFilter() {
-  const sel = document.getElementById("responsible-filter");
+function populateResponsibleFilter(selectId) {
+  const sel = document.getElementById(selectId);
   const prevValue = sel.value;
   sel.innerHTML = `<option value="">Всички отговорници</option>` +
     Object.entries(usersById).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join("");
@@ -2087,14 +2090,21 @@ async function loadClients() {
   const body = document.getElementById("clients-body");
   body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
   populateResponsibleSelect();
+  populateResponsibleFilter("clients-responsible-filter");
 
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("clients")
     .select("id, name, eik_egn, type, active, responsible_user_id")
     .order("name");
 
   if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
+  if (!rawData || rawData.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
+
+  const responsibleFilterValue = document.getElementById("clients-responsible-filter").value;
+  const data = responsibleFilterValue
+    ? rawData.filter((c) => c.responsible_user_id === responsibleFilterValue)
+    : rawData;
+  if (data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
 
   // .order("name") в заявката подрежда по байтове (Postgres default
   // collation), не винаги вярно азбучно за кирилица — пресортираме
@@ -2141,6 +2151,8 @@ async function loadClients() {
     });
   });
 }
+
+document.getElementById("clients-responsible-filter").addEventListener("change", loadClients);
 
 const DOSSIER_FLAGS = { sol: "СОЛ", sol_personal_labor: "СОЛ с личен труд", td: "ТД", gd: "ГД" };
 

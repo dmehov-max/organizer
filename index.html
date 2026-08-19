@@ -99,6 +99,8 @@
   .stage-cell { font-weight: 700; font-size: 1rem; color: var(--muted); transition: background .1s; }
   .stage-cell:hover { background: var(--accent-soft); }
   .stage-cell.stage-done { color: var(--ok, #2e7d32); }
+  .stage-cell.stage-active-timer { color: var(--amber); background: var(--amber-soft); animation: pulse-timer 1.4s ease-in-out infinite; }
+  @keyframes pulse-timer { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
   .stage-cell .ref-mini { font-size: .68rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
   .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
   .progress-pct.progress-done { color: var(--ok, #2e7d32); }
@@ -229,6 +231,17 @@
   #ai-form { display: flex; border-top: 1px solid var(--line); }
   #ai-input { flex: 1; border: none; padding: 10px; font: inherit; background: transparent; color: var(--ink); }
   #ai-input:focus { outline: none; }
+
+  /* --- работен таймер (Осчетоводяване) --- */
+  #time-tracker-widget {
+    position: fixed; bottom: 20px; left: 20px; display: none; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--accent); border-radius: 999px;
+    padding: 8px 8px 8px 16px; box-shadow: 0 4px 20px rgba(0,0,0,.2); z-index: 60;
+  }
+  #time-tracker-widget.open { display: flex; }
+  #time-tracker-widget .ttw-info { font-size: .8rem; line-height: 1.25; }
+  #time-tracker-widget .ttw-clock { font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent-ink); }
+  #time-tracker-widget .ttw-label { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -364,6 +377,16 @@
           </tr></thead>
           <tbody id="bookkeeping-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
         </table>
+      </div>
+
+      <div id="bk-time-report-wrap" style="display:none; margin-top:24px">
+        <h3 style="margin:0 0 10px">Отчет по време</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Счетоводител</th><th>Фирма</th><th>Приходи</th><th>Разходи</th><th>Заплати</th><th>Банка</th><th>Общо</th></tr></thead>
+            <tbody id="bk-time-report-body"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -505,6 +528,14 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <div id="time-tracker-widget">
+    <div class="ttw-info">
+      <div class="ttw-clock" id="ttw-clock">00:00:00</div>
+      <div class="ttw-label" id="ttw-label"></div>
+    </div>
+    <button class="primary small" id="ttw-stop-btn">Готово</button>
   </div>
 
   <button id="ai-toggle" title="Помощник">?</button>
@@ -767,6 +798,7 @@ async function enterApp() {
 
   loadTasks();
   refreshMfaSetupStatus({ autoPrompt: true });
+  resumeOrCloseStaleTimer();
 }
 
 // ---------------- Регистрация на 2FA (SPEC.md §11) ----------------
@@ -852,7 +884,13 @@ let idleTimer;
 function resetIdleTimer() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(async () => {
-    if (myProfile) { await supabase.auth.signOut(); showBanner("Излязохте автоматично поради неактивност."); }
+    if (myProfile) {
+      // Спира текущия таймер (ако тече) ПРЕДИ изхода — след signOut
+      // сесията пада и записът остава увиснал (stopped_at = null).
+      if (activeTimer) await stopTimer({ markDone: false, auto: true });
+      await supabase.auth.signOut();
+      showBanner("Излязохте автоматично поради неактивност.");
+    }
   }, IDLE_LIMIT_MS);
 }
 ["mousemove", "keydown", "click", "scroll"].forEach((evt) =>
@@ -872,7 +910,7 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
-    if (tab === "bookkeeping") loadBookkeepingSummary();
+    if (tab === "bookkeeping") { loadBookkeepingSummary(); loadBkTimeReport(); }
     if (tab === "users") loadUsers();
   });
 });
@@ -2318,7 +2356,7 @@ async function loadBookkeepingSummary() {
   });
 }
 
-document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
+document.getElementById("bk-year-filter").addEventListener("change", () => { loadBookkeepingSummary(); loadBkTimeReport(); });
 
 const bookkeepingDetailBackdrop = document.getElementById("bookkeeping-detail-backdrop");
 document.getElementById("close-bookkeeping-detail-btn").addEventListener("click", () => bookkeepingDetailBackdrop.classList.remove("open"));
@@ -2352,22 +2390,200 @@ async function openBookkeepingDetail(clientId, clientName) {
       const month = Number(cell.dataset.month);
       const category = cell.dataset.category;
       const isDone = cell.classList.contains("stage-done");
+      const isActive = cell.classList.contains("stage-active-timer");
+
       if (isDone) {
+        // Разчекване — директно, без таймер (симетрично на преди).
         const { error } = await supabase.from("bookkeeping_progress")
           .delete().eq("client_id", clientId).eq("year", year).eq("category", category).eq("month", month);
         if (error) { showBanner("Грешка: " + error.message); return; }
-        cell.classList.remove("stage-done");
-        cell.textContent = "";
-      } else {
-        const { error } = await supabase.from("bookkeeping_progress")
-          .insert({ client_id: clientId, year, category, month, done_by: myProfile.id });
-        if (error) { showBanner("Грешка: " + error.message); return; }
-        cell.classList.add("stage-done");
-        cell.textContent = "✓";
+        loadBookkeepingSummary();
+        openBookkeepingDetail(clientId, clientName);
+        return;
       }
-      loadBookkeepingSummary(); // обновява "до кой месец" в справката отзад
+
+      if (isActive) {
+        // Клик върху текущо-течащата клетка = директно "Готово" (същото
+        // като бутона в долния ляв ъгъл).
+        await stopTimer({ markDone: true });
+        loadBookkeepingSummary();
+        openBookkeepingDetail(clientId, clientName);
+        return;
+      }
+
+      // Старт на нов таймер тук. Ако вече тече друг някъде — първо се
+      // спира БЕЗ да се чеква (просто записва изкараното време дотук,
+      // не значи, че старата клетка е готова).
+      await startTimer(clientId, clientName, year, category, month);
+      openBookkeepingDetail(clientId, clientName);
     });
   });
+}
+
+// ---------------- Работен таймер (Осчетоводяване) ----------------
+// In-app старт/стоп — обмисляно беше OS-level проследяване на друго
+// приложение/цялостна активност на компютъра (реалната работа е в
+// счетоводния софтуер, не в Органайзер), но отпаднало заради сложност
+// (браузърът физически няма достъп до други процеси) и практичност —
+// решено 2026-08-19 да остане просто in-app таймер, а не наблюдение
+// на компютъра на служителя (и последното е трудово-правен въпрос).
+
+let activeTimer = null; // { id, client_id, year, category, month, clientName } | null
+let tickIntervalId = null;
+
+function bkCategoryLabel(code) {
+  return BK_CATEGORIES.find(([c]) => c === code)?.[1] ?? code;
+}
+
+function formatHMS(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+  const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+  const s = String(totalSec % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+function formatDurationShort(ms) {
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}ч ${m}м` : `${m}м`;
+}
+
+const timeTrackerWidget = document.getElementById("time-tracker-widget");
+const ttwClock = document.getElementById("ttw-clock");
+const ttwLabel = document.getElementById("ttw-label");
+
+function renderTimerWidget() {
+  if (!activeTimer) { timeTrackerWidget.classList.remove("open"); return; }
+  timeTrackerWidget.classList.add("open");
+  ttwLabel.textContent = `${activeTimer.clientName} · ${bkCategoryLabel(activeTimer.category)} ${MONTH_LABELS[activeTimer.month - 1]}`;
+}
+
+function startTicking() {
+  clearInterval(tickIntervalId);
+  tickIntervalId = setInterval(() => {
+    if (!activeTimer) { clearInterval(tickIntervalId); return; }
+    ttwClock.textContent = formatHMS(Date.now() - new Date(activeTimer.started_at).getTime());
+  }, 1000);
+}
+
+async function startTimer(clientId, clientName, year, category, month) {
+  if (activeTimer) await stopTimer({ markDone: false }); // превключване, не "готово"
+  const { data, error } = await supabase.from("time_entries")
+    .insert({ client_id: clientId, year, category, month, user_id: myProfile.id })
+    .select("id, client_id, year, category, month, started_at").single();
+  if (error) { showBanner("Грешка при старт на таймера: " + error.message); return; }
+  activeTimer = { ...data, clientName };
+  renderTimerWidget();
+  startTicking();
+}
+
+// markDone: чекира клетката в bookkeeping_progress след спиране (само
+// при изричното "Готово"). auto: маркира записа като автоматично
+// спрян (idle/забравен таймер), не влияе на markDone поведението.
+async function stopTimer({ markDone, auto = false } = {}) {
+  if (!activeTimer) return;
+  const entry = activeTimer;
+  clearInterval(tickIntervalId);
+  activeTimer = null;
+  renderTimerWidget();
+
+  const { error } = await supabase.from("time_entries")
+    .update({ stopped_at: new Date().toISOString(), auto_stopped: auto })
+    .eq("id", entry.id);
+  if (error) { showBanner("Грешка при спиране на таймера: " + error.message); return; }
+
+  if (markDone) {
+    const { error: bkErr } = await supabase.from("bookkeeping_progress")
+      .insert({ client_id: entry.client_id, year: entry.year, category: entry.category, month: entry.month, done_by: myProfile.id });
+    // 23505 = вече чекнато преди (напр. презастъпващи сесии) — не е грешка тук.
+    if (bkErr && bkErr.code !== "23505") showBanner("Грешка при чекване: " + bkErr.message);
+  }
+}
+
+document.getElementById("ttw-stop-btn").addEventListener("click", async () => {
+  const wasClientId = activeTimer?.client_id;
+  await stopTimer({ markDone: true });
+  loadBookkeepingSummary();
+  // Ако детайлният модал за същата фирма е отворен, опреснява го.
+  if (wasClientId && bookkeepingDetailBackdrop.classList.contains("open")) {
+    openBookkeepingDetail(wasClientId, document.getElementById("bookkeeping-detail-title").textContent);
+  }
+});
+
+// При "забравен" таймер (браузърът затворен без изход) — при следващ
+// вход намираме отворения запис. Ако е по-стар от 12ч, приемаме, че е
+// забравен и го затваряме автоматично (без чекване); иначе просто го
+// продължаваме (взимаме си го за активен) — по-вероятно е реално да е
+// продължил да работи, отколкото случайна сесия отпреди дни.
+async function resumeOrCloseStaleTimer() {
+  const { data } = await supabase.from("time_entries")
+    .select("id, client_id, year, category, month, started_at, clients(name)")
+    .eq("user_id", myProfile.id).is("stopped_at", null)
+    .order("started_at", { ascending: false }).limit(1);
+  const entry = data?.[0];
+  if (!entry) return;
+
+  const ageMs = Date.now() - new Date(entry.started_at).getTime();
+  if (ageMs > 12 * 60 * 60 * 1000) {
+    await supabase.from("time_entries")
+      .update({ stopped_at: entry.started_at, auto_stopped: true }).eq("id", entry.id);
+    showBanner(`Намерих забравен таймер (${entry.clients?.name ?? "?"}) — автоматично спрян.`, "ok");
+    return;
+  }
+  activeTimer = {
+    id: entry.id, client_id: entry.client_id, year: entry.year, category: entry.category,
+    month: entry.month, started_at: entry.started_at, clientName: entry.clients?.name ?? "?",
+  };
+  renderTimerWidget();
+  startTicking();
+}
+
+async function loadBkTimeReport() {
+  const wrap = document.getElementById("bk-time-report-wrap");
+  if (myProfile?.role !== "admin") { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  const year = Number(document.getElementById("bk-year-filter").value);
+  const body = document.getElementById("bk-time-report-body");
+  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase.from("time_entries")
+    .select("user_id, client_id, category, started_at, stopped_at, clients(name), profiles(full_name)")
+    .eq("year", year).not("stopped_at", "is", null);
+  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма записано време.</td></tr>`; return; }
+
+  // Групира по (потребител, клиент), с колона за всяка категория + общо.
+  const groups = new Map(); // key -> { userName, clientName, revenue, expense, salaries, bank, total }
+  for (const row of data) {
+    const key = `${row.user_id}|${row.client_id}`;
+    const durMs = new Date(row.stopped_at) - new Date(row.started_at);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        userName: row.profiles?.full_name ?? "?", clientName: row.clients?.name ?? "?",
+        revenue: 0, expense: 0, salaries: 0, bank: 0, total: 0,
+      });
+    }
+    const g = groups.get(key);
+    g[row.category] += durMs;
+    g.total += durMs;
+  }
+
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.userName.localeCompare(b.userName, "bg") || a.clientName.localeCompare(b.clientName, "bg"));
+
+  body.innerHTML = sorted.map((g) => `
+    <tr>
+      <td>${escapeHtml(g.userName)}</td>
+      <td>${escapeHtml(g.clientName)}</td>
+      <td>${g.revenue ? formatDurationShort(g.revenue) : "—"}</td>
+      <td>${g.expense ? formatDurationShort(g.expense) : "—"}</td>
+      <td>${g.salaries ? formatDurationShort(g.salaries) : "—"}</td>
+      <td>${g.bank ? formatDurationShort(g.bank) : "—"}</td>
+      <td style="font-weight:700">${formatDurationShort(g.total)}</td>
+    </tr>
+  `).join("");
 }
 
 // ---------------- AI помощник ----------------

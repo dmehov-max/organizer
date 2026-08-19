@@ -340,6 +340,10 @@
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5.5" r="2"/><path d="M2.5 13c0-2 1.5-3.5 3.5-3.5s3.5 1.5 3.5 3.5"/><circle cx="11.5" cy="5.8" r="1.6"/><path d="M9.7 9.8c.4-.2.9-.3 1.3-.3 1.8 0 3.1 1.3 3.1 3.1"/></svg>
         Потребители
       </button>
+      <button class="tab" data-tab="statistics" id="statistics-tab-btn" style="display:none">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.5V2M2 13.5h12"/><rect x="4.5" y="8.5" width="2" height="3.5"/><rect x="8" y="6" width="2" height="6"/><rect x="11.5" y="4" width="2" height="8"/></svg>
+        Статистика
+      </button>
     </nav>
 
     <div id="banner-area"></div>
@@ -450,9 +454,16 @@
           <tbody id="bookkeeping-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
+    </section>
 
-      <div id="bk-time-report-wrap" style="display:none; margin-top:24px">
-        <h3 style="margin:0 0 10px">Отчет по време</h3>
+    <section id="statistics-panel" style="display:none">
+      <div class="filter-toolbar">
+        <label for="stats-year-filter" style="margin:0; text-transform:none; font-weight:400; color:var(--muted); font-size:.85rem">Година:</label>
+        <select id="stats-year-filter"></select>
+      </div>
+
+      <div id="bk-time-report-wrap" style="margin-top:10px">
+        <h3 style="margin:0 0 10px">Изработено време — Осчетоводяване</h3>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Счетоводител</th><th>Фирма</th><th>Приходи</th><th>Разходи</th><th>Заплати</th><th>Банка</th><th>Общо</th></tr></thead>
@@ -461,8 +472,8 @@
         </div>
       </div>
 
-      <div id="task-time-report-wrap" style="display:none; margin-top:24px">
-        <h3 style="margin:0 0 10px">Отчет по задачи</h3>
+      <div id="task-time-report-wrap" style="margin-top:24px">
+        <h3 style="margin:0 0 10px">Изработено време — Задачи</h3>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Счетоводител</th><th>Фирма</th><th>Задължение</th><th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Общо</th></tr></thead>
@@ -880,6 +891,7 @@ async function enterApp() {
   // клиенти на друг счетоводител (profiles_select също разширена в 0043).
   document.getElementById("clients-tab-btn").style.display = "";
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+  document.getElementById("statistics-tab-btn").style.display = profile.role === "admin" ? "" : "none";
 
   const { data: profs } = await supabase.from("profiles").select("id, full_name");
   usersById = Object.fromEntries((profs ?? []).map((p) => [p.id, p.full_name]));
@@ -997,10 +1009,12 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
     document.getElementById("inspections-panel").style.display = tab === "inspections" ? "" : "none";
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
+    document.getElementById("statistics-panel").style.display = tab === "statistics" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
     if (tab === "inspections") loadInspections();
-    if (tab === "bookkeeping") { loadBookkeepingSummary(); loadBkTimeReport(); loadTaskTimeReport(); }
+    if (tab === "bookkeeping") loadBookkeepingSummary();
+    if (tab === "statistics") { loadBkTimeReport(); loadTaskTimeReport(); }
     if (tab === "users") loadUsers();
   });
 });
@@ -2433,8 +2447,8 @@ const BK_CATEGORIES = [
 ];
 const MONTH_LABELS = ["Яну", "Фев", "Мар", "Апр", "Май", "Юни", "Юли", "Авг", "Сеп", "Окт", "Ное", "Дек"];
 
-function bkYearOptions() {
-  const sel = document.getElementById("bk-year-filter");
+function populateYearOptions(selectId) {
+  const sel = document.getElementById(selectId);
   if (sel.options.length) return; // веднъж е достатъчно, стойността се пази между табовете
   const current = new Date().getFullYear();
   for (let y = current + 1; y >= current - 2; y--) {
@@ -2447,7 +2461,7 @@ function bkYearOptions() {
 }
 
 async function loadBookkeepingSummary() {
-  bkYearOptions();
+  populateYearOptions("bk-year-filter");
   const year = Number(document.getElementById("bk-year-filter").value);
   const body = document.getElementById("bookkeeping-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
@@ -2484,7 +2498,8 @@ async function loadBookkeepingSummary() {
   });
 }
 
-document.getElementById("bk-year-filter").addEventListener("change", () => { loadBookkeepingSummary(); loadBkTimeReport(); });
+document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
+document.getElementById("stats-year-filter").addEventListener("change", () => { loadBkTimeReport(); loadTaskTimeReport(); });
 
 const bookkeepingDetailBackdrop = document.getElementById("bookkeeping-detail-backdrop");
 document.getElementById("close-bookkeeping-detail-btn").addEventListener("click", () => bookkeepingDetailBackdrop.classList.remove("open"));
@@ -2713,10 +2728,9 @@ async function resumeOrCloseStaleTimer() {
 }
 
 async function loadBkTimeReport() {
-  const wrap = document.getElementById("bk-time-report-wrap");
-  if (myProfile?.role !== "admin") { wrap.style.display = "none"; return; }
-  wrap.style.display = "";
-  const year = Number(document.getElementById("bk-year-filter").value);
+  if (myProfile?.role !== "admin") return; // табът е admin-only, но за всеки случай
+  populateYearOptions("stats-year-filter");
+  const year = Number(document.getElementById("stats-year-filter").value);
   const body = document.getElementById("bk-time-report-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
 
@@ -2759,9 +2773,7 @@ async function loadBkTimeReport() {
 }
 
 async function loadTaskTimeReport() {
-  const wrap = document.getElementById("task-time-report-wrap");
-  if (myProfile?.role !== "admin") { wrap.style.display = "none"; return; }
-  wrap.style.display = "";
+  if (myProfile?.role !== "admin") return; // табът е admin-only, но за всеки случай
   const body = document.getElementById("task-time-report-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
 

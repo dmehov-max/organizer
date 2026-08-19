@@ -80,9 +80,21 @@
   #login-error { color: var(--red); font-size: .85rem; margin-top: 10px; min-height: 1.2em; }
 
   /* --- tabs --- */
-  nav.tabs { display: flex; gap: 8px; margin-bottom: 18px; }
-  nav.tabs button.tab { background: none; border: none; padding: 6px 4px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; }
-  nav.tabs button.tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  nav.tabs {
+    display: flex; align-items: center; gap: 3px; margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--line);
+  }
+  nav.tabs button.tab {
+    background: none; border: none; padding: 7px 15px; color: var(--muted);
+    border-radius: 999px; font-size: .92rem; font-weight: 500;
+    transition: background .15s ease, color .15s ease;
+  }
+  nav.tabs button.tab:hover { background: var(--paper); color: var(--ink); }
+  nav.tabs button.tab.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+  /* Разделя оперативните табове (Задачи/Осчетоводяване) от
+     административните (Клиенти/Потребители) — поискано изрично,
+     чисто визуална разлика, не пипа достъпа. */
+  nav.tabs .tab-divider { width: 1px; height: 22px; background: var(--line); margin: 0 7px; }
 
   /* --- table (клиенти, форми) --- */
   .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
@@ -302,8 +314,9 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">Задачи</button>
-      <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
       <button class="tab" data-tab="bookkeeping" id="bookkeeping-tab-btn">Осчетоводяване</button>
+      <span class="tab-divider"></span>
+      <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
       <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">Потребители</button>
     </nav>
 

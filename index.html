@@ -447,6 +447,7 @@
       <div class="filter-toolbar">
         <label for="bk-year-filter" style="margin:0; text-transform:none; font-weight:400; color:var(--muted); font-size:.85rem">Година:</label>
         <select id="bk-year-filter"></select>
+        <select id="bk-responsible-filter"><option value="">Всички отговорници</option></select>
       </div>
       <div class="table-wrap">
         <table>
@@ -2474,22 +2475,27 @@ function populateYearOptions(selectId) {
 
 async function loadBookkeepingSummary() {
   populateYearOptions("bk-year-filter");
+  populateResponsibleFilter("bk-responsible-filter");
   const year = Number(document.getElementById("bk-year-filter").value);
+  const responsibleFilterValue = document.getElementById("bk-responsible-filter").value;
   const body = document.getElementById("bookkeeping-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
 
   // RLS (0048) вече ограничава до собствените клиенти за счетоводител,
   // всички за admin — същия модел като clients в момента.
   const { data: clients, error: cErr } = await supabase
-    .from("clients").select("id, name, eik_egn, type").eq("active", true);
+    .from("clients").select("id, name, eik_egn, type, responsible_user_id").eq("active", true);
   if (cErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${cErr.message}</td></tr>`; return; }
-  const sorted = [...(clients ?? [])].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "bg"));
+  const filtered = responsibleFilterValue
+    ? (clients ?? []).filter((c) => c.responsible_user_id === responsibleFilterValue)
+    : (clients ?? []);
+  const sorted = [...filtered].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "bg"));
 
   const { data: progress, error: pErr } = await supabase
     .from("bookkeeping_progress").select("client_id, category, month").eq("year", year);
   if (pErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${pErr.message}</td></tr>`; return; }
 
-  if (sorted.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти.</td></tr>`; return; }
+  if (sorted.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
 
   body.innerHTML = sorted.map((c, i) => {
     const cells = BK_CATEGORIES.map(([code]) => {
@@ -2511,6 +2517,7 @@ async function loadBookkeepingSummary() {
 }
 
 document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
+document.getElementById("bk-responsible-filter").addEventListener("change", loadBookkeepingSummary);
 document.getElementById("stats-year-filter").addEventListener("change", () => { loadBkTimeReport(); loadTaskTimeReport(); });
 
 const bookkeepingDetailBackdrop = document.getElementById("bookkeeping-detail-backdrop");

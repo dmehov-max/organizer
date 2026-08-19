@@ -503,6 +503,12 @@
           <div id="settings-panel" style="max-height:320px;overflow-y:auto">Зареждане…</div>
         </div>
       </div>
+      <div class="form-table" style="margin-top:20px">
+        <div class="form-row" style="align-items:start">
+          <label for="ec-notes" style="margin-top:8px">Забележка</label>
+          <textarea id="ec-notes" rows="3" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical"></textarea>
+        </div>
+      </div>
       <div class="modal-actions">
         <button type="button" id="close-edit-client-btn">Затвори</button>
       </div>
@@ -2106,6 +2112,16 @@ async function toggleClientSettings(tr) {
           .eq("client_id", clientId).eq("flag", cb.dataset.flag).is("ended_on", null);
       }
       logAudit("client", clientId, "dossier_flag_changed", { flag: cb.dataset.flag, active: cb.checked });
+      // Тригерите в базата (0009) пресмятат наново кои задължения
+      // важат (client_obligation_settings), но НЕ създават реалната
+      // задача за текущия период — за нов клиент това го прави JS-ът
+      // при създаване, но тук (промяна на досие на СЪЩЕСТВУВАЩ
+      // клиент) липсваше — реален пропуск, открит на живо 2026-08-19
+      // (КОРЕКТ МУВЪРС: флаг сложен, настройка включена, задача обаче
+      // никаква до ръчно извикване). Викаме го и тук, само за този клиент.
+      fetch(GENERATE_TASKS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: clientId }) })
+        .then((r) => r.ok ? null : r.text().then((t) => console.error("generate-tasks:", r.status, t)))
+        .catch((e) => console.error("generate-tasks fetch failed:", e));
       cb.disabled = false;
       showBanner("Досието е обновено.", "ok");
     });
@@ -2115,7 +2131,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes").eq("id", clientId).single();
 
   // Смяна на отговорника — поискано изрично (2026-08-18). Отначало
   // само admin можеше да редактира тук; същия ден по-късно е
@@ -2166,6 +2182,7 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-eik").value = clientRow?.eik_egn ?? "";
   document.getElementById("ec-city").value = clientRow?.address_city ?? "";
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
+  document.getElementById("ec-notes").value = clientRow?.notes ?? "";
   document.getElementById("ec-tasks-start").value = clientRow?.tasks_start_date ?? "";
   currentEditClientType = clientRow?.type ?? "legal_entity";
   updateEcEikHint();
@@ -2179,10 +2196,11 @@ async function toggleClientSettings(tr) {
     const city = document.getElementById("ec-city").value.trim();
     const street = document.getElementById("ec-street").value.trim();
     const tasksStart = document.getElementById("ec-tasks-start").value;
+    const notes = document.getElementById("ec-notes").value.trim();
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
     if (!updateEcEikHint()) { showBanner(`${currentEditClientType === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(currentEditClientType)} цифри — не е записано.`); return; }
     const { error } = await supabase.from("clients")
-      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
+      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, notes: notes || null, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
@@ -2195,7 +2213,7 @@ async function toggleClientSettings(tr) {
   // всяко отваряне (и щеше да пише в СТАРИЯ clientId при следващо
   // blur). Присвояването сменя предишния, само последният важи —
   // същият похват, ползван по-долу за vatCb.onchange/activeCb.onchange.
-  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start"].forEach((id) => {
+  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start", "ec-notes"].forEach((id) => {
     document.getElementById(id).onblur = saveCompanyData;
   });
 
@@ -2224,6 +2242,11 @@ async function toggleClientSettings(tr) {
           .eq("client_id", clientId).eq("registration_type_id", vatTypeId).is("ended_on", null);
       }
       logAudit("client", clientId, "vat_registration_changed", { active: vatCb.checked });
+      // Същия пропуск/фикс като при досие флаговете по-горе — тригерите
+      // пресмятат настройката, но не създават реалната задача веднага.
+      fetch(GENERATE_TASKS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: clientId }) })
+        .then((r) => r.ok ? null : r.text().then((t) => console.error("generate-tasks:", r.status, t)))
+        .catch((e) => console.error("generate-tasks fetch failed:", e));
       vatCb.disabled = false;
       showBanner("Регистрацията е обновена.", "ok");
     };

@@ -85,12 +85,18 @@
     padding-bottom: 12px; border-bottom: 1px solid var(--line);
   }
   nav.tabs button.tab {
-    background: none; border: none; padding: 7px 15px; color: var(--muted);
+    display: inline-flex; align-items: center; gap: 7px;
+    background: none; border: none; padding: 7px 16px 7px 13px; color: var(--muted);
     border-radius: 999px; font-size: .92rem; font-weight: 500;
-    transition: background .15s ease, color .15s ease;
+    transition: background .15s ease, color .15s ease, box-shadow .15s ease;
   }
+  nav.tabs button.tab .tab-icon { flex: 0 0 auto; opacity: .8; }
   nav.tabs button.tab:hover { background: var(--paper); color: var(--ink); }
-  nav.tabs button.tab.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+  nav.tabs button.tab.active {
+    background: var(--accent-soft); color: var(--accent-ink); font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0,0,0,.07);
+  }
+  nav.tabs button.tab.active .tab-icon { opacity: 1; }
   /* Разделя оперативните табове (Задачи/Осчетоводяване) от
      административните (Клиенти/Потребители) — поискано изрично,
      чисто визуална разлика, не пипа достъпа. */
@@ -313,12 +319,27 @@
     </div>
 
     <nav class="tabs">
-      <button class="tab active" data-tab="tasks">Задачи</button>
-      <button class="tab" data-tab="bookkeeping" id="bookkeeping-tab-btn">Осчетоводяване</button>
-      <button class="tab" data-tab="inspections" id="inspections-tab-btn">Проверки и ревизии</button>
+      <button class="tab active" data-tab="tasks">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z"/><path d="M6 2.5V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.5"/><path d="M5.5 7.5l1.5 1.5 3-3"/></svg>
+        Задачи
+      </button>
+      <button class="tab" data-tab="bookkeeping" id="bookkeeping-tab-btn">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="4.5" width="13" height="9" rx="1.5"/><path d="M1.5 7h13"/><circle cx="11.5" cy="10" r="1"/></svg>
+        Осчетоводяване
+      </button>
+      <button class="tab" data-tab="inspections" id="inspections-tab-btn">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M13.5 13.5L10.3 10.3"/></svg>
+        Проверки и ревизии
+      </button>
       <span class="tab-divider"></span>
-      <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">Клиенти</button>
-      <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">Потребители</button>
+      <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1"/><path d="M5.5 4.5h1M9.5 4.5h1M5.5 7.5h1M9.5 7.5h1M5.5 10.5h1M9.5 10.5h1"/><path d="M6.5 14.5v-3h3v3"/></svg>
+        Клиенти
+      </button>
+      <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5.5" r="2"/><path d="M2.5 13c0-2 1.5-3.5 3.5-3.5s3.5 1.5 3.5 3.5"/><circle cx="11.5" cy="5.8" r="1.6"/><path d="M9.7 9.8c.4-.2.9-.3 1.3-.3 1.8 0 3.1 1.3 3.1 3.1"/></svg>
+        Потребители
+      </button>
     </nav>
 
     <div id="banner-area"></div>

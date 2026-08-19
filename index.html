@@ -401,6 +401,16 @@
           </table>
         </div>
       </div>
+
+      <div id="task-time-report-wrap" style="display:none; margin-top:24px">
+        <h3 style="margin:0 0 10px">Отчет по задачи</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Счетоводител</th><th>Фирма</th><th>Задължение</th><th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Общо</th></tr></thead>
+            <tbody id="task-time-report-body"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <div class="modal-backdrop" id="bookkeeping-detail-backdrop">
@@ -929,7 +939,7 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
-    if (tab === "bookkeeping") { loadBookkeepingSummary(); loadBkTimeReport(); }
+    if (tab === "bookkeeping") { loadBookkeepingSummary(); loadBkTimeReport(); loadTaskTimeReport(); }
     if (tab === "users") loadUsers();
   });
 });
@@ -1377,7 +1387,10 @@ function renderProgressTable(sorted) {
     const done = !!t[field];
     const refNumber = field === "stage_submission_done" ? t.submission_reference_number : null;
     const title = refNumber ? ` title="№ ${escapeHtml(refNumber)}"` : "";
-    return `<td class="stage-cell${done ? " stage-done" : ""}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${done ? "✓" : ""}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
+    const isActive = !done && activeTimer?.kind === "task" && activeTimer.task_id === t.id && activeTimer.stage === key;
+    const cls = done ? " stage-done" : isActive ? " stage-active-timer" : "";
+    const content = done ? "✓" : isActive ? "⏱" : "";
+    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${content}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
   };
 
   // Плащането не е поле в tasks, а отделен ред в task_payments — и
@@ -1446,6 +1459,24 @@ function renderProgressTable(sorted) {
         renderTaskCards();
         return;
       }
+
+      const isDone = !!entry.t[field];
+      const stageKey = cell.dataset.key; // "creation"/"review"/"submission"
+      const isTimerRunningHere = activeTimer?.kind === "task" && activeTimer.task_id === id && activeTimer.stage === stageKey;
+
+      // Първи клик на непопълнена клетка — само старт на таймера, БЕЗ да
+      // пипа стойността все още (номерът на декларация/довършването
+      // остават за втория клик, когато таймерът вече тече точно тук).
+      // Поискано изрично 2026-08-19, разширява същия механизъм от
+      // Осчетоводяване (0049) — виж коментарите там за пълния контекст
+      // (защо in-app, не OS-level проследяване).
+      if (!isDone && !isTimerRunningHere) {
+        const label = `${entry.t.clients?.name ?? "?"} · ${entry.t.obligation_types?.name ?? ""} · ${TASK_STAGE_LABELS[stageKey] ?? stageKey}`;
+        await startTaskTimer(id, stageKey, label);
+        renderTaskCards();
+        return;
+      }
+      if (isTimerRunningHere) await stopTimer({ markDone: false }); // само записва времето, довършването е логиката по-долу
 
       const newValue = !entry.t[field];
       const update = { [field]: newValue };
@@ -2464,8 +2495,14 @@ async function openBookkeepingDetail(clientId, clientName) {
 // решено 2026-08-19 да остане просто in-app таймер, а не наблюдение
 // на компютъра на служителя (и последното е трудово-правен въпрос).
 
-let activeTimer = null; // { id, client_id, year, category, month, clientName } | null
+// activeTimer е ПОЛИМОРФЕН — само ЕДИН тече наведнъж, независимо от
+// вида (правило, поискано изрично):
+//   { kind: "bookkeeping", id, client_id, year, category, month, clientName, started_at }
+//   { kind: "task", id, task_id, stage, label, started_at }
+let activeTimer = null;
 let tickIntervalId = null;
+
+const TASK_STAGE_LABELS = { creation: "Създаване", review: "Проверка", submission: "Подаване" };
 
 function bkCategoryLabel(code) {
   return BK_CATEGORIES.find(([c]) => c === code)?.[1] ?? code;
@@ -2493,7 +2530,13 @@ const ttwLabel = document.getElementById("ttw-label");
 function renderTimerWidget() {
   if (!activeTimer) { timeTrackerWidget.classList.remove("open"); return; }
   timeTrackerWidget.classList.add("open");
-  ttwLabel.textContent = `${activeTimer.clientName} · ${bkCategoryLabel(activeTimer.category)} ${MONTH_LABELS[activeTimer.month - 1]}`;
+  ttwLabel.textContent = activeTimer.kind === "bookkeeping"
+    ? `${activeTimer.clientName} · ${bkCategoryLabel(activeTimer.category)} ${MONTH_LABELS[activeTimer.month - 1]}`
+    : activeTimer.label;
+  // За задача "Готово" не значи нищо тук — довършването (номер на
+  // декларация и т.н.) минава само през клетката в прогрес-таблицата,
+  // затова бутонът тук само спира (записва времето), не чекира нищо.
+  document.getElementById("ttw-stop-btn").textContent = activeTimer.kind === "bookkeeping" ? "Готово" : "Спри";
 }
 
 function startTicking() {
@@ -2510,14 +2553,27 @@ async function startTimer(clientId, clientName, year, category, month) {
     .insert({ client_id: clientId, year, category, month, user_id: myProfile.id })
     .select("id, client_id, year, category, month, started_at").single();
   if (error) { showBanner("Грешка при старт на таймера: " + error.message); return; }
-  activeTimer = { ...data, clientName };
+  activeTimer = { kind: "bookkeeping", ...data, clientName };
+  renderTimerWidget();
+  startTicking();
+}
+
+async function startTaskTimer(taskId, stage, label) {
+  if (activeTimer) await stopTimer({ markDone: false });
+  const { data, error } = await supabase.from("task_time_entries")
+    .insert({ task_id: taskId, stage, user_id: myProfile.id })
+    .select("id, task_id, stage, started_at").single();
+  if (error) { showBanner("Грешка при старт на таймера: " + error.message); return; }
+  activeTimer = { kind: "task", ...data, label };
   renderTimerWidget();
   startTicking();
 }
 
 // markDone: чекира клетката в bookkeeping_progress след спиране (само
-// при изричното "Готово"). auto: маркира записа като автоматично
-// спрян (idle/забравен таймер), не влияе на markDone поведението.
+// за kind:"bookkeeping" и само при изричното "Готово" — за задачи
+// довършването минава през съществуващата логика в прогрес-таблицата,
+// не тук, затова markDone няма ефект при kind:"task"). auto: маркира
+// записа като автоматично спрян (idle/забравен таймер).
 async function stopTimer({ markDone, auto = false } = {}) {
   if (!activeTimer) return;
   const entry = activeTimer;
@@ -2525,12 +2581,13 @@ async function stopTimer({ markDone, auto = false } = {}) {
   activeTimer = null;
   renderTimerWidget();
 
-  const { error } = await supabase.from("time_entries")
+  const table = entry.kind === "bookkeeping" ? "time_entries" : "task_time_entries";
+  const { error } = await supabase.from(table)
     .update({ stopped_at: new Date().toISOString(), auto_stopped: auto })
     .eq("id", entry.id);
   if (error) { showBanner("Грешка при спиране на таймера: " + error.message); return; }
 
-  if (markDone) {
+  if (markDone && entry.kind === "bookkeeping") {
     const { error: bkErr } = await supabase.from("bookkeeping_progress")
       .insert({ client_id: entry.client_id, year: entry.year, category: entry.category, month: entry.month, done_by: myProfile.id });
     // 23505 = вече чекнато преди (напр. презастъпващи сесии) — не е грешка тук.
@@ -2539,39 +2596,57 @@ async function stopTimer({ markDone, auto = false } = {}) {
 }
 
 document.getElementById("ttw-stop-btn").addEventListener("click", async () => {
+  const wasKind = activeTimer?.kind;
   const wasClientId = activeTimer?.client_id;
-  await stopTimer({ markDone: true });
-  loadBookkeepingSummary();
-  // Ако детайлният модал за същата фирма е отворен, опреснява го.
-  if (wasClientId && bookkeepingDetailBackdrop.classList.contains("open")) {
-    openBookkeepingDetail(wasClientId, document.getElementById("bookkeeping-detail-title").textContent);
+  await stopTimer({ markDone: wasKind === "bookkeeping" });
+  if (wasKind === "bookkeeping") {
+    loadBookkeepingSummary();
+    // Ако детайлният модал за същата фирма е отворен, опреснява го.
+    if (wasClientId && bookkeepingDetailBackdrop.classList.contains("open")) {
+      openBookkeepingDetail(wasClientId, document.getElementById("bookkeeping-detail-title").textContent);
+    }
+  } else if (wasKind === "task") {
+    renderTaskCards(); // презарежда прогрес-таблицата, показва клетката като спряна (не чекната)
   }
 });
 
 // При "забравен" таймер (браузърът затворен без изход) — при следващ
-// вход намираме отворения запис. Ако е по-стар от 12ч, приемаме, че е
-// забравен и го затваряме автоматично (без чекване); иначе просто го
-// продължаваме (взимаме си го за активен) — по-вероятно е реално да е
-// продължил да работи, отколкото случайна сесия отпреди дни.
+// вход намираме отворения запис (проверяваме и двата вида, взимаме
+// по-скорошния — правилото "само един активен" би трябвало да гарантира,
+// че само единия има отворен ред, но за всеки случай). Ако е по-стар
+// от 12ч, приемаме, че е забравен и го затваряме автоматично (без да
+// довършва нищо); иначе просто го продължаваме — по-вероятно е реално
+// да е продължил да работи, отколкото случайна сесия отпреди дни.
 async function resumeOrCloseStaleTimer() {
-  const { data } = await supabase.from("time_entries")
-    .select("id, client_id, year, category, month, started_at, clients(name)")
-    .eq("user_id", myProfile.id).is("stopped_at", null)
-    .order("started_at", { ascending: false }).limit(1);
-  const entry = data?.[0];
+  const [{ data: bkData }, { data: taskData }] = await Promise.all([
+    supabase.from("time_entries")
+      .select("id, client_id, year, category, month, started_at, clients(name)")
+      .eq("user_id", myProfile.id).is("stopped_at", null)
+      .order("started_at", { ascending: false }).limit(1),
+    supabase.from("task_time_entries")
+      .select("id, task_id, stage, started_at, tasks(clients(name), obligation_types(name))")
+      .eq("user_id", myProfile.id).is("stopped_at", null)
+      .order("started_at", { ascending: false }).limit(1),
+  ]);
+  const bk = bkData?.[0], task = taskData?.[0];
+  const isBk = bk && (!task || new Date(bk.started_at) > new Date(task.started_at));
+  const entry = isBk ? bk : task;
   if (!entry) return;
 
   const ageMs = Date.now() - new Date(entry.started_at).getTime();
+  const table = isBk ? "time_entries" : "task_time_entries";
+  const name = isBk ? entry.clients?.name : entry.tasks?.clients?.name;
+
   if (ageMs > 12 * 60 * 60 * 1000) {
-    await supabase.from("time_entries")
-      .update({ stopped_at: entry.started_at, auto_stopped: true }).eq("id", entry.id);
-    showBanner(`Намерих забравен таймер (${entry.clients?.name ?? "?"}) — автоматично спрян.`, "ok");
+    await supabase.from(table).update({ stopped_at: entry.started_at, auto_stopped: true }).eq("id", entry.id);
+    showBanner(`Намерих забравен таймер (${name ?? "?"}) — автоматично спрян.`, "ok");
     return;
   }
-  activeTimer = {
-    id: entry.id, client_id: entry.client_id, year: entry.year, category: entry.category,
-    month: entry.month, started_at: entry.started_at, clientName: entry.clients?.name ?? "?",
-  };
+
+  activeTimer = isBk
+    ? { kind: "bookkeeping", id: entry.id, client_id: entry.client_id, year: entry.year, category: entry.category, month: entry.month, started_at: entry.started_at, clientName: name ?? "?" }
+    : { kind: "task", id: entry.id, task_id: entry.task_id, stage: entry.stage, started_at: entry.started_at,
+        label: `${name ?? "?"} · ${entry.tasks?.obligation_types?.name ?? ""} · ${TASK_STAGE_LABELS[entry.stage] ?? entry.stage}` };
   renderTimerWidget();
   startTicking();
 }
@@ -2617,6 +2692,51 @@ async function loadBkTimeReport() {
       <td>${g.expense ? formatDurationShort(g.expense) : "—"}</td>
       <td>${g.salaries ? formatDurationShort(g.salaries) : "—"}</td>
       <td>${g.bank ? formatDurationShort(g.bank) : "—"}</td>
+      <td style="font-weight:700">${formatDurationShort(g.total)}</td>
+    </tr>
+  `).join("");
+}
+
+async function loadTaskTimeReport() {
+  const wrap = document.getElementById("task-time-report-wrap");
+  if (myProfile?.role !== "admin") { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  const body = document.getElementById("task-time-report-body");
+  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase.from("task_time_entries")
+    .select("user_id, started_at, stopped_at, stage, tasks(client_id, clients(name), obligation_types(name)), profiles(full_name)")
+    .not("stopped_at", "is", null);
+  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма записано време.</td></tr>`; return; }
+
+  const groups = new Map(); // key -> { userName, clientName, obligationName, creation, review, submission, total }
+  for (const row of data) {
+    const key = `${row.user_id}|${row.tasks?.client_id}|${row.tasks?.obligation_types?.name}`;
+    const durMs = new Date(row.stopped_at) - new Date(row.started_at);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        userName: row.profiles?.full_name ?? "?", clientName: row.tasks?.clients?.name ?? "?",
+        obligationName: row.tasks?.obligation_types?.name ?? "?",
+        creation: 0, review: 0, submission: 0, total: 0,
+      });
+    }
+    const g = groups.get(key);
+    g[row.stage] += durMs;
+    g.total += durMs;
+  }
+
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.userName.localeCompare(b.userName, "bg") || a.clientName.localeCompare(b.clientName, "bg"));
+
+  body.innerHTML = sorted.map((g) => `
+    <tr>
+      <td>${escapeHtml(g.userName)}</td>
+      <td>${escapeHtml(g.clientName)}</td>
+      <td>${escapeHtml(g.obligationName)}</td>
+      <td>${g.creation ? formatDurationShort(g.creation) : "—"}</td>
+      <td>${g.review ? formatDurationShort(g.review) : "—"}</td>
+      <td>${g.submission ? formatDurationShort(g.submission) : "—"}</td>
       <td style="font-weight:700">${formatDurationShort(g.total)}</td>
     </tr>
   `).join("");

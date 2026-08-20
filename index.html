@@ -507,6 +507,9 @@
     </div>
 
     <section id="users-panel" style="display:none">
+      <div class="clients-toolbar">
+        <button class="primary" id="open-new-user-btn">+ Нов потребител</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>№</th><th>Име</th><th>Роля</th><th>Статус</th><th></th></tr></thead>
@@ -514,6 +517,28 @@
         </table>
       </div>
     </section>
+  </div>
+
+  <div class="modal-backdrop" id="new-user-backdrop">
+    <div class="modal">
+      <h2>Нов потребител</h2>
+      <form id="new-user-form">
+        <div class="form-table">
+          <div class="form-row"><label for="nu-name">Име</label><input id="nu-name" required /></div>
+          <div class="form-row"><label for="nu-email">Имейл</label><input id="nu-email" type="email" required /></div>
+          <div class="form-row"><label for="nu-role">Роля</label>
+            <select id="nu-role">
+              <option value="accountant">Счетоводител</option>
+              <option value="admin">Admin</option>
+            </select></div>
+        </div>
+        <p class="hint" style="margin:12px 0 0">Създава акаунт с временна парола — ще ти я покажа веднага след създаването, предай я директно на човека (не се праща имейл).</p>
+        <div class="modal-actions">
+          <button type="button" id="cancel-new-user-btn">Отказ</button>
+          <button class="primary" type="submit">Създай</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div class="modal-backdrop" id="new-client-backdrop">
@@ -671,6 +696,10 @@ const GENERATE_TASKS_URL = `${SUPABASE_URL}/functions/v1/clever-responder`;
 // Истинското деплойнато име на check-drive-files функцията е
 // "swift-worker" (Supabase го генерира случайно при създаването).
 const CHECK_DRIVE_URL = `${SUPABASE_URL}/functions/v1/swift-worker`;
+// СМЕНИ това с реалното деплойнато име на create-user функцията —
+// Supabase го генерира случайно при създаването, не "create-user"
+// (виж supabase/functions/create-user/README.md, ако е добавен).
+const CREATE_USER_URL = `${SUPABASE_URL}/functions/v1/create-user`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1045,7 +1074,12 @@ async function loadUsers() {
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td>${escapeHtml(u.full_name)}${isSelf ? " (ти)" : ""}</td>
-      <td>${u.role === "admin" ? "admin" : "счетоводител"}</td>
+      <td>${isSelf
+        ? (u.role === "admin" ? "admin" : "счетоводител")
+        : `<select class="user-role-select" data-id="${u.id}">
+             <option value="accountant"${u.role !== "admin" ? " selected" : ""}>Счетоводител</option>
+             <option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option>
+           </select>`}</td>
       <td>${u.active ? "активен" : "спрян"}</td>
       <td>${isSelf ? "" : `<button class="user-toggle-btn" data-id="${u.id}" data-active="${u.active}">${u.active ? "Спри достъп" : "Възстанови достъп"}</button>`}</td>
     `;
@@ -1064,7 +1098,67 @@ async function loadUsers() {
       loadUsers();
     });
   });
+
+  body.querySelectorAll(".user-role-select").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const newRole = sel.value;
+      if (!confirm(`Смяна на роля на ${newRole === "admin" ? "admin" : "счетоводител"}. Продължи?`)) {
+        loadUsers(); // връща селекта на старата стойност
+        return;
+      }
+      sel.disabled = true;
+      const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", sel.dataset.id);
+      if (error) { showBanner("Грешка: " + error.message); loadUsers(); return; }
+      showBanner("Ролята е сменена.", "ok");
+      loadUsers();
+    });
+  });
 }
+
+const newUserBackdrop = document.getElementById("new-user-backdrop");
+document.getElementById("open-new-user-btn").addEventListener("click", () => newUserBackdrop.classList.add("open"));
+function closeNewUserModal() {
+  newUserBackdrop.classList.remove("open");
+  document.getElementById("new-user-form").reset();
+}
+document.getElementById("cancel-new-user-btn").addEventListener("click", closeNewUserModal);
+newUserBackdrop.addEventListener("click", (e) => { if (e.target === newUserBackdrop) closeNewUserModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && newUserBackdrop.classList.contains("open")) closeNewUserModal(); });
+
+document.getElementById("new-user-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const full_name = document.getElementById("nu-name").value.trim();
+  const email = document.getElementById("nu-email").value.trim();
+  const role = document.getElementById("nu-role").value;
+  if (!full_name || !email) return;
+
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(CREATE_USER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({ email, full_name, role }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "неизвестна грешка");
+    closeNewUserModal();
+    // Временната парола се показва еднократно тук — не се пази никъде,
+    // ако се затвори това известие без да е записана, трябва нов
+    // потребител (изтрий и пробвай пак) или ръчна смяна през SQL.
+    alert(`Потребителят е създаден.\n\nИмейл: ${email}\nВременна парола: ${data.temp_password}\n\nПредай това директно на човека — не се праща имейл.`);
+    logAudit("profile", data.user_id, "user_created", { email, role });
+    loadUsers();
+  } catch (err) {
+    showBanner("Грешка при създаване: " + err.message);
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
 
 // ---------------- Задачи ----------------
 

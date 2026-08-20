@@ -512,11 +512,26 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>№</th><th>Име</th><th>Роля</th><th>Статус</th><th></th></tr></thead>
-          <tbody id="users-body"><tr><td colspan="5" class="loading">Зареждане…</td></tr></tbody>
+          <thead><tr><th>№</th><th>Име</th><th>Роля</th><th>Статус</th><th>Последно влизане</th><th></th></tr></thead>
+          <tbody id="users-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
+  </div>
+
+  <div class="modal-backdrop" id="login-history-backdrop">
+    <div class="modal">
+      <h2 id="login-history-title">История на вход</h2>
+      <div class="table-wrap" style="max-height:360px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Дата и час</th></tr></thead>
+          <tbody id="login-history-body"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="close-login-history-btn">Затвори</button>
+      </div>
+    </div>
   </div>
 
   <div class="modal-backdrop" id="new-user-backdrop">
@@ -764,8 +779,16 @@ loginForm.addEventListener("submit", async (e) => {
   loginError.textContent = "";
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) loginError.textContent = "Грешен имейл или парола.";
+  const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) { loginError.textContent = "Грешен имейл или парола."; return; }
+  // История на вход (0053) — записва се тук, при реалния вход с
+  // парола, не при всяко презареждане на страницата с вече жива
+  // сесия (onAuthStateChange SIGNED_IN/INITIAL_SESSION не разграничава
+  // ясно двете в тази версия на клиента).
+  if (signInData?.user) {
+    supabase.from("login_log").insert({ user_id: signInData.user.id })
+      .then(({ error: logErr }) => { if (logErr) console.error("login_log:", logErr); });
+  }
 });
 
 document.getElementById("logout-btn").addEventListener("click", async () => {
@@ -1054,22 +1077,39 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
 
 // ---------------- Потребители (само admin) ----------------
 
+function formatDateTimeBg(iso) {
+  const d = new Date(iso);
+  const date = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  const time = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(d);
+  return `${date} ${time}`;
+}
+
 async function loadUsers() {
   const body = document.getElementById("users-body");
-  body.innerHTML = `<tr><td colspan="5" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
 
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name, role, active");
 
-  if (error) { body.innerHTML = `<tr><td colspan="5" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="5" class="empty">Няма потребители.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма потребители.</td></tr>`; return; }
+
+  // История на вход (0053) — вземаме всичко и групираме тук, вместо
+  // отделна заявка на потребител (само 3-4 души, обемът е нищожен).
+  const { data: logins } = await supabase.from("login_log").select("user_id, logged_in_at");
+  const lastLoginByUser = new Map();
+  for (const l of logins ?? []) {
+    const prev = lastLoginByUser.get(l.user_id);
+    if (!prev || l.logged_in_at > prev) lastLoginByUser.set(l.user_id, l.logged_in_at);
+  }
 
   data.sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "", "bg"));
 
   body.innerHTML = "";
   data.forEach((u, i) => {
     const isSelf = u.id === myProfile.id;
+    const lastLogin = lastLoginByUser.get(u.id);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${i + 1}</td>
@@ -1081,9 +1121,16 @@ async function loadUsers() {
              <option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option>
            </select>`}</td>
       <td>${u.active ? "активен" : "спрян"}</td>
+      <td>${lastLogin
+        ? `<a class="linklike login-history-btn" data-id="${u.id}" data-name="${escapeHtml(u.full_name)}">${formatDateTimeBg(lastLogin)}</a>`
+        : `<span style="color:var(--muted)">никога</span>`}</td>
       <td>${isSelf ? "" : `<button class="user-toggle-btn" data-id="${u.id}" data-active="${u.active}">${u.active ? "Спри достъп" : "Възстанови достъп"}</button>`}</td>
     `;
     body.appendChild(tr);
+  });
+
+  body.querySelectorAll(".login-history-btn").forEach((a) => {
+    a.addEventListener("click", () => openLoginHistory(a.dataset.id, a.dataset.name));
   });
 
   body.querySelectorAll(".user-toggle-btn").forEach((btn) => {
@@ -1113,6 +1160,25 @@ async function loadUsers() {
       loadUsers();
     });
   });
+}
+
+const loginHistoryBackdrop = document.getElementById("login-history-backdrop");
+document.getElementById("close-login-history-btn").addEventListener("click", () => loginHistoryBackdrop.classList.remove("open"));
+loginHistoryBackdrop.addEventListener("click", (e) => { if (e.target === loginHistoryBackdrop) loginHistoryBackdrop.classList.remove("open"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && loginHistoryBackdrop.classList.contains("open")) loginHistoryBackdrop.classList.remove("open"); });
+
+async function openLoginHistory(userId, userName) {
+  document.getElementById("login-history-title").textContent = `История на вход — ${userName}`;
+  loginHistoryBackdrop.classList.add("open");
+  const body = document.getElementById("login-history-body");
+  body.innerHTML = `<tr><td class="loading">Зареждане…</td></tr>`;
+
+  const { data, error } = await supabase.from("login_log")
+    .select("logged_in_at").eq("user_id", userId).order("logged_in_at", { ascending: false }).limit(50);
+  if (error) { body.innerHTML = `<tr><td class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td class="empty">Няма записи.</td></tr>`; return; }
+
+  body.innerHTML = data.map((l) => `<tr><td>${formatDateTimeBg(l.logged_in_at)}</td></tr>`).join("");
 }
 
 const newUserBackdrop = document.getElementById("new-user-backdrop");

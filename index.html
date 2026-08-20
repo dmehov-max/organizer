@@ -524,7 +524,7 @@
       <h2 id="login-history-title">История на вход</h2>
       <div class="table-wrap" style="max-height:360px;overflow-y:auto">
         <table>
-          <thead><tr><th>Дата и час</th></tr></thead>
+          <thead><tr><th>Вход</th><th>Изход</th><th>Продължителност</th></tr></thead>
           <tbody id="login-history-body"></tbody>
         </table>
       </div>
@@ -773,6 +773,13 @@ const mfaChallengeForm = document.getElementById("mfa-challenge-form");
 const mfaChallengeError = document.getElementById("mfa-challenge-error");
 let pendingMfaFactorId = null;
 
+// Продължителност на сесия (0054) — id-то на текущия login_log ред,
+// за да му допишем logged_out_at при изход. Само в паметта на
+// таба/сесията — ако браузърът се затвори рязко (без "Изход" и без
+// idle-таймаута да успее да гръмне), редът остава без изход/
+// продължителност, не се решава тук.
+let currentLoginLogId = null;
+
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   loginError.textContent = "";
@@ -785,12 +792,23 @@ loginForm.addEventListener("submit", async (e) => {
   // сесия (onAuthStateChange SIGNED_IN/INITIAL_SESSION не разграничава
   // ясно двете в тази версия на клиента).
   if (signInData?.user) {
-    supabase.from("login_log").insert({ user_id: signInData.user.id })
-      .then(({ error: logErr }) => { if (logErr) console.error("login_log:", logErr); });
+    supabase.from("login_log").insert({ user_id: signInData.user.id }).select("id").single()
+      .then(({ data: logRow, error: logErr }) => {
+        if (logErr) console.error("login_log:", logErr);
+        else currentLoginLogId = logRow.id;
+      });
   }
 });
 
+async function closeLoginLogSession() {
+  if (!currentLoginLogId) return;
+  const id = currentLoginLogId;
+  currentLoginLogId = null;
+  await supabase.from("login_log").update({ logged_out_at: new Date().toISOString() }).eq("id", id);
+}
+
 document.getElementById("logout-btn").addEventListener("click", async () => {
+  await closeLoginLogSession();
   await supabase.auth.signOut();
 });
 
@@ -1040,9 +1058,11 @@ function resetIdleTimer() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(async () => {
     if (myProfile) {
-      // Спира текущия таймер (ако тече) ПРЕДИ изхода — след signOut
-      // сесията пада и записът остава увиснал (stopped_at = null).
+      // Спира текущия таймер (ако тече) и затваря login_log сесията
+      // ПРЕДИ изхода — след signOut сесията пада и записите остават
+      // увиснали (stopped_at/logged_out_at = null).
       if (activeTimer) await stopTimer({ markDone: false, auto: true });
+      await closeLoginLogSession();
       await supabase.auth.signOut();
       showBanner("Излязохте автоматично поради неактивност.");
     }
@@ -1170,14 +1190,23 @@ async function openLoginHistory(userId, userName) {
   document.getElementById("login-history-title").textContent = `История на вход — ${userName}`;
   loginHistoryBackdrop.classList.add("open");
   const body = document.getElementById("login-history-body");
-  body.innerHTML = `<tr><td class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td class="loading" colspan="3">Зареждане…</td></tr>`;
 
   const { data, error } = await supabase.from("login_log")
-    .select("logged_in_at").eq("user_id", userId).order("logged_in_at", { ascending: false }).limit(50);
-  if (error) { body.innerHTML = `<tr><td class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td class="empty">Няма записи.</td></tr>`; return; }
+    .select("logged_in_at, logged_out_at").eq("user_id", userId).order("logged_in_at", { ascending: false }).limit(50);
+  if (error) { body.innerHTML = `<tr><td class="empty" colspan="3">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td class="empty" colspan="3">Няма записи.</td></tr>`; return; }
 
-  body.innerHTML = data.map((l) => `<tr><td>${formatDateTimeBg(l.logged_in_at)}</td></tr>`).join("");
+  body.innerHTML = data.map((l) => {
+    const durationCell = l.logged_out_at
+      ? formatDurationShort(new Date(l.logged_out_at) - new Date(l.logged_in_at))
+      : `<span style="color:var(--accent-ink)">все още активна</span>`;
+    return `<tr>
+      <td>${formatDateTimeBg(l.logged_in_at)}</td>
+      <td>${l.logged_out_at ? formatDateTimeBg(l.logged_out_at) : "—"}</td>
+      <td>${durationCell}</td>
+    </tr>`;
+  }).join("");
 }
 
 const newUserBackdrop = document.getElementById("new-user-backdrop");

@@ -711,10 +711,9 @@ const GENERATE_TASKS_URL = `${SUPABASE_URL}/functions/v1/clever-responder`;
 // Истинското деплойнато име на check-drive-files функцията е
 // "swift-worker" (Supabase го генерира случайно при създаването).
 const CHECK_DRIVE_URL = `${SUPABASE_URL}/functions/v1/swift-worker`;
-// СМЕНИ това с реалното деплойнато име на create-user функцията —
-// Supabase го генерира случайно при създаването, не "create-user"
-// (виж supabase/functions/create-user/README.md, ако е добавен).
-const CREATE_USER_URL = `${SUPABASE_URL}/functions/v1/create-user`;
+// Истинското деплойнато име на create-user функцията е
+// "hyper-function" (Supabase го генерира случайно при създаването).
+const CREATE_USER_URL = `${SUPABASE_URL}/functions/v1/hyper-function`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

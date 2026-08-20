@@ -464,6 +464,7 @@
       <div class="filter-toolbar">
         <label for="stats-year-filter" style="margin:0; text-transform:none; font-weight:400; color:var(--muted); font-size:.85rem">Година:</label>
         <select id="stats-year-filter"></select>
+        <select id="stats-responsible-filter"><option value="">Всички потребители</option></select>
       </div>
 
       <div id="bk-time-report-wrap" style="margin-top:10px">
@@ -2707,6 +2708,7 @@ async function loadBookkeepingSummary() {
 document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
 document.getElementById("bk-responsible-filter").addEventListener("change", loadBookkeepingSummary);
 document.getElementById("stats-year-filter").addEventListener("change", () => { loadBkTimeReport(); loadTaskTimeReport(); });
+document.getElementById("stats-responsible-filter").addEventListener("change", () => { loadBkTimeReport(); loadTaskTimeReport(); });
 
 const bookkeepingDetailBackdrop = document.getElementById("bookkeeping-detail-backdrop");
 document.getElementById("close-bookkeeping-detail-btn").addEventListener("click", () => bookkeepingDetailBackdrop.classList.remove("open"));
@@ -2937,13 +2939,17 @@ async function resumeOrCloseStaleTimer() {
 async function loadBkTimeReport() {
   if (myProfile?.role !== "admin") return; // табът е admin-only, но за всеки случай
   populateYearOptions("stats-year-filter");
+  populateResponsibleFilter("stats-responsible-filter");
   const year = Number(document.getElementById("stats-year-filter").value);
+  const userFilter = document.getElementById("stats-responsible-filter").value;
   const body = document.getElementById("bk-time-report-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
 
-  const { data, error } = await supabase.from("time_entries")
+  let query = supabase.from("time_entries")
     .select("user_id, client_id, category, started_at, stopped_at, clients(name), profiles(full_name)")
     .eq("year", year).not("stopped_at", "is", null);
+  if (userFilter) query = query.eq("user_id", userFilter);
+  const { data, error } = await query;
   if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
   if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма записано време.</td></tr>`; return; }
 
@@ -2981,12 +2987,15 @@ async function loadBkTimeReport() {
 
 async function loadTaskTimeReport() {
   if (myProfile?.role !== "admin") return; // табът е admin-only, но за всеки случай
+  const userFilter = document.getElementById("stats-responsible-filter").value;
   const body = document.getElementById("task-time-report-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
 
-  const { data, error } = await supabase.from("task_time_entries")
+  let query = supabase.from("task_time_entries")
     .select("user_id, started_at, stopped_at, stage, tasks(client_id, clients(name), obligation_types(name)), profiles(full_name)")
     .not("stopped_at", "is", null);
+  if (userFilter) query = query.eq("user_id", userFilter);
+  const { data, error } = await query;
   if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
   if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма записано време.</td></tr>`; return; }
 

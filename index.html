@@ -662,8 +662,20 @@
       <form id="new-event-task-form">
         <div class="form-table">
           <div class="form-row"><label for="net-client">Клиент</label><select id="net-client" required></select></div>
+          <div class="check-row" id="net-bulk-row">
+            <label class="switch"><input type="checkbox" id="net-bulk-all" /><span class="switch-track"></span></label>
+            <label for="net-bulk-all">Приложи за всички активни фирми (ЮЛ) — игнорира избрания клиент по-горе</label>
+          </div>
           <div class="form-row"><label for="net-obligation">Задължение</label><select id="net-obligation" required></select></div>
-          <div class="form-row"><label for="net-event-date">Дата на събитието</label><input id="net-event-date" type="date" required /></div>
+          <div class="form-row" id="net-new-name-row" style="display:none">
+            <label for="net-new-obligation-name">Ново име</label>
+            <input id="net-new-obligation-name" placeholder="напр. Превалутиране на капитала" />
+          </div>
+          <div class="check-row" id="net-new-confirm-row" style="display:none">
+            <label class="switch"><input type="checkbox" id="net-new-confirm" checked /><span class="switch-track"></span></label>
+            <label for="net-new-confirm">Изисква прикачено потвърждение, за да се завърши</label>
+          </div>
+          <div class="form-row"><label for="net-event-date">Дата на събитието</label><input id="net-event-date" type="date" /></div>
           <div class="form-row"><label for="net-period">Период (етикет)</label><input id="net-period" placeholder="напр. 2026-08 или описание" /></div>
           <div class="form-row"><label for="net-due-date">Срок</label><input id="net-due-date" type="date" /></div>
           <div class="form-row" id="net-reason-row" style="display:none"><label for="net-reason">Причина (категория, не диагноза)</label><input id="net-reason" placeholder="напр. общо заболяване" /></div>
@@ -1946,13 +1958,25 @@ async function openNewEventTaskModal() {
       .eq("trigger_type", "event").is("valid_to", null).order("name");
     eventObligationsCache = data ?? [];
   }
-  oblSel.innerHTML = eventObligationsCache.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join("");
+  // "+ Ново име…" (поискано изрично 2026-08-21) — вместо да чака SQL
+  // миграция за всяко еднократно/ad-hoc задължение, admin може да
+  // въведе ново име директно тук; submit handler-ът създава реда в
+  // obligation_types на момента (виж по-долу).
+  oblSel.innerHTML = eventObligationsCache.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join("")
+    + `<option value="__new__">+ Ново име…</option>`;
+  document.getElementById("net-new-name-row").style.display = "none";
+  document.getElementById("net-new-confirm-row").style.display = "none";
+  document.getElementById("net-bulk-all").checked = false;
+  clientSel.disabled = false;
   updateEventTaskDefaults();
 }
 function closeNewEventTaskModal() {
   newEventTaskBackdrop.classList.remove("open");
   document.getElementById("new-event-task-form").reset();
   document.getElementById("net-reason-row").style.display = "none";
+  document.getElementById("net-new-name-row").style.display = "none";
+  document.getElementById("net-new-confirm-row").style.display = "none";
+  document.getElementById("net-client").disabled = false;
 }
 
 // Автоматично предлага период/срок според избраното задължение +
@@ -1964,6 +1988,9 @@ function updateEventTaskDefaults() {
   const obligation = eventObligationsCache?.find((o) => o.id === oblId);
   const eventDate = document.getElementById("net-event-date").value;
   document.getElementById("net-reason-row").style.display = obligation?.code === "sick_leave" ? "" : "none";
+  const isNew = oblId === "__new__";
+  document.getElementById("net-new-name-row").style.display = isNew ? "" : "none";
+  document.getElementById("net-new-confirm-row").style.display = isNew ? "" : "none";
 
   if (!obligation || !eventDate) return;
   const periodInput = document.getElementById("net-period");
@@ -2006,44 +2033,114 @@ newEventTaskBackdrop.addEventListener("click", (e) => { if (e.target === newEven
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && newEventTaskBackdrop.classList.contains("open")) closeNewEventTaskModal(); });
 document.getElementById("net-obligation").addEventListener("change", updateEventTaskDefaults);
 document.getElementById("net-event-date").addEventListener("change", updateEventTaskDefaults);
+document.getElementById("net-bulk-all").addEventListener("change", (e) => {
+  document.getElementById("net-client").disabled = e.target.checked;
+});
 
 document.getElementById("new-event-task-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const submitBtn = e.target.querySelector("button[type=submit]");
   const clientId = document.getElementById("net-client").value;
-  const obligationId = document.getElementById("net-obligation").value;
-  const eventDate = document.getElementById("net-event-date").value;
-  const period = document.getElementById("net-period").value.trim() || eventDate.slice(0, 7);
+  const bulkAll = document.getElementById("net-bulk-all").checked;
+  let obligationId = document.getElementById("net-obligation").value;
+  const eventDate = document.getElementById("net-event-date").value || null;
+  const period = document.getElementById("net-period").value.trim() || (eventDate ? eventDate.slice(0, 7) : "");
   const dueDate = document.getElementById("net-due-date").value;
   const reason = document.getElementById("net-reason").value.trim();
-  const obligation = eventObligationsCache?.find((o) => o.id === obligationId);
-  if (!clientId || !obligationId || !eventDate || !dueDate) {
-    showBanner("Клиент, задължение, дата на събитието и срок са задължителни.");
+  const newName = document.getElementById("net-new-obligation-name").value.trim();
+
+  if ((!bulkAll && !clientId) || !obligationId || !dueDate || !period) {
+    showBanner(bulkAll ? "Задължение, период и срок са задължителни." : "Клиент, задължение, период и срок са задължителни.");
     return;
   }
+  if (obligationId === "__new__" && !newName) {
+    showBanner("Въведи ново име за задължението.");
+    return;
+  }
+
+  let obligation = eventObligationsCache?.find((o) => o.id === obligationId);
   if (obligation?.code === "sick_leave" && !reason) {
     showBanner("Въведи категория/причина за болничния (не диагноза).");
     return;
   }
 
-  const { data: client } = await supabase.from("clients").select("responsible_user_id").eq("id", clientId).single();
-  const { data: newTask, error } = await supabase.from("tasks").insert({
-    client_id: clientId, obligation_type_id: obligationId, period_label: period,
-    event_date: eventDate, due_date: dueDate, assigned_user_id: client?.responsible_user_id ?? null,
-    status: "waiting",
-  }).select("id").single();
-  if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+  submitBtn.disabled = true;
+  try {
+    // "+ Ново име…" (поискано изрично 2026-08-21) — вместо SQL миграция
+    // за всяко еднократно/ad-hoc задължение (напр. "Превалутиране на
+    // капитала" за 2026 г.), създаваме реда в obligation_types тук на
+    // момента. trigger_type='event' → generate-tasks/periodsForRule
+    // изрично НЕ го генерира сам (виж default клона там), значи няма
+    // риск от дублиране с крона — задачите по него се създават само
+    // ръчно оттук, точно както болничен/чл.55/чл.88.
+    if (obligationId === "__new__") {
+      const requiresConfirmation = document.getElementById("net-new-confirm").checked;
+      const { data: newObligation, error: oblErr } = await supabase.from("obligation_types").insert({
+        code: `custom_${Date.now().toString(36)}`,
+        name: newName,
+        trigger_type: "event",
+        deadline_rule: { type: "manual" },
+        requires_payment: false,
+        requires_confirmation_upload: requiresConfirmation,
+      }).select("id, code, name, deadline_rule, requires_payment").single();
+      if (oblErr) { showBanner("Грешка при създаване на задължението: " + oblErr.message); return; }
+      obligation = newObligation;
+      obligationId = newObligation.id;
+      eventObligationsCache = [...(eventObligationsCache ?? []), newObligation];
+    }
 
-  if (obligation?.requires_payment) {
-    await supabase.from("task_payments").insert({ task_id: newTask.id, due_date: dueDate, paid: false });
-  }
-  if (obligation?.code === "sick_leave") {
-    await supabase.from("task_sick_leave_details").insert({ task_id: newTask.id, reason });
-  }
-  logAudit("task", newTask.id, "event_task_created", { client_id: clientId, obligation_type_id: obligationId });
+    if (bulkAll) {
+      // "За всички активни фирми" (поискано изрично 2026-08-21) —
+      // само ЮЛ (type='legal_entity'), не физически лица/СОЛ като
+      // едноличен търговец — задължения като "Превалутиране на
+      // капитала" не важат за тях (нямат капитал). Уникалният индекс
+      // (client_id, obligation_type_id, period_label) пази от
+      // дублиране при повторен опит — 23505 се третира като "вече
+      // съществува", не като грешка, по същия принцип като
+      // generate-tasks.
+      const { data: clients, error: clientsErr } = await supabase.from("clients")
+        .select("id, responsible_user_id").eq("active", true).eq("type", "legal_entity");
+      if (clientsErr) { showBanner("Грешка при зареждане на клиенти: " + clientsErr.message); return; }
 
-  closeNewEventTaskModal();
-  showBanner("Задачата е създадена.", "ok");
-  loadTasks();
+      let created = 0, existed = 0, failed = 0;
+      for (const c of clients ?? []) {
+        const { error } = await supabase.from("tasks").insert({
+          client_id: c.id, obligation_type_id: obligationId, period_label: period,
+          event_date: eventDate, due_date: dueDate, assigned_user_id: c.responsible_user_id ?? null,
+          status: "waiting",
+        });
+        if (error) { if (error.code === "23505") existed++; else failed++; continue; }
+        created++;
+      }
+      logAudit("obligation_type", obligationId, "event_task_bulk_created", { period_label: period, created, existed, failed });
+      closeNewEventTaskModal();
+      showBanner(`Създадени ${created} задачи от ${(clients ?? []).length} активни ЮЛ фирми` + (existed ? `, ${existed} вече съществуваха` : "") + (failed ? `, ${failed} грешки` : "") + ".", failed ? "err" : "ok");
+      loadTasks();
+      return;
+    }
+
+    const { data: client } = await supabase.from("clients").select("responsible_user_id").eq("id", clientId).single();
+    const { data: newTask, error } = await supabase.from("tasks").insert({
+      client_id: clientId, obligation_type_id: obligationId, period_label: period,
+      event_date: eventDate, due_date: dueDate, assigned_user_id: client?.responsible_user_id ?? null,
+      status: "waiting",
+    }).select("id").single();
+    if (error) { showBanner("Грешка при създаване: " + error.message); return; }
+
+    if (obligation?.requires_payment) {
+      await supabase.from("task_payments").insert({ task_id: newTask.id, due_date: dueDate, paid: false });
+    }
+    if (obligation?.code === "sick_leave") {
+      await supabase.from("task_sick_leave_details").insert({ task_id: newTask.id, reason });
+    }
+    logAudit("task", newTask.id, "event_task_created", { client_id: clientId, obligation_type_id: obligationId });
+
+    closeNewEventTaskModal();
+    showBanner("Задачата е създадена.", "ok");
+    loadTasks();
+  } finally {
+    submitBtn.disabled = false;
+  }
 });
 
 // ---------------- Детайли на задача: потвърждение + плащане ----------------

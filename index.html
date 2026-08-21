@@ -118,6 +118,7 @@
   .stage-cell:hover { background: var(--accent-soft); }
   .stage-cell.stage-done { color: var(--ok, #2e7d32); }
   .stage-cell.stage-active-timer { color: var(--amber); background: var(--amber-soft); animation: pulse-timer 1.4s ease-in-out infinite; }
+  .stage-cell.stage-rejected { color: var(--red); background: var(--red-soft); }
   @keyframes pulse-timer { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
   .stage-cell .ref-mini { font-size: .68rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
   .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -375,7 +376,7 @@
         <table>
           <thead><tr>
             <th>№</th><th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
-            <th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Платено</th>
+            <th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Прието</th><th>Платено</th>
           </tr></thead>
           <tbody id="progress-table-body"></tbody>
           <tfoot><tr class="progress-total-row">
@@ -384,6 +385,7 @@
             <td id="progress-total-creation"></td>
             <td id="progress-total-review"></td>
             <td id="progress-total-submission"></td>
+            <td id="progress-total-accepted"></td>
             <td id="progress-total-payment"></td>
           </tr></tfoot>
         </table>
@@ -525,7 +527,7 @@
       <h2 id="login-history-title">История на вход</h2>
       <div class="table-wrap" style="max-height:360px;overflow-y:auto">
         <table>
-          <thead><tr><th>Вход</th><th>Изход</th><th>Продължителност</th></tr></thead>
+          <thead><tr><th>Вход</th><th>Изход</th><th>Продължителност</th><th>IP</th></tr></thead>
           <tbody id="login-history-body"></tbody>
         </table>
       </div>
@@ -781,11 +783,33 @@ let pendingMfaFactorId = null;
 // продължителност, не се решава тук.
 let currentLoginLogId = null;
 
+// "Позната IP" (0055) — 2FA поканата се пропуска, ако потребителят
+// вече е влизал от този IP ПРЕДИ тази сесия (виж isLoginIpKnown() и
+// checkMfaAndProceed() по-долу). clientIpPromise се стартира веднага
+// при подаване на логин формата и се дели между двете места — иначе
+// checkMfaAndProceed() (задействана от onAuthStateChange) може да
+// изпревари довършването на IP заявката тук.
+let clientIpPromise = null;
+let thisSessionLoginTimestamp = null;
+
+async function fetchClientIp() {
+  try {
+    const res = await fetch("https://api.ipify.org?format=json");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.ip ?? null;
+  } catch (_e) {
+    return null; // без IP просто винаги ще пита 2FA — по-безопасната посока
+  }
+}
+
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   loginError.textContent = "";
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
+  thisSessionLoginTimestamp = new Date().toISOString();
+  clientIpPromise = fetchClientIp();
   const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) { loginError.textContent = "Грешен имейл или парола."; return; }
   // История на вход (0053) — записва се тук, при реалния вход с
@@ -793,7 +817,8 @@ loginForm.addEventListener("submit", async (e) => {
   // сесия (onAuthStateChange SIGNED_IN/INITIAL_SESSION не разграничава
   // ясно двете в тази версия на клиента).
   if (signInData?.user) {
-    supabase.from("login_log").insert({ user_id: signInData.user.id }).select("id").single()
+    const ip = await clientIpPromise;
+    supabase.from("login_log").insert({ user_id: signInData.user.id, ip_address: ip }).select("id").single()
       .then(({ data: logRow, error: logErr }) => {
         if (logErr) console.error("login_log:", logErr);
         else currentLoginLogId = logRow.id;
@@ -894,6 +919,7 @@ async function checkMfaAndProceed() {
   const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (error) { console.error(error); return enterApp(); }
   if (data.nextLevel === "aal2" && data.currentLevel !== data.nextLevel) {
+    if (await isLoginIpKnown()) return enterApp(); // позната IP — пропуска поканата (виж бележката там за границите на това)
     loginView.style.display = "none";
     resetPasswordView.style.display = "none";
     appView.style.display = "none";
@@ -903,6 +929,28 @@ async function checkMfaAndProceed() {
   } else {
     enterApp();
   }
+}
+
+// "Позната IP" (0055) — пропуска 2FA поканата, ако потребителят вече е
+// влизал от този IP ПРЕДИ тази сесия. `.lt("logged_in_at", ...)` пази
+// от самозасичане на собствения си, току-що вмъкнат ред при първи път
+// от нова IP (иначе би могло да мине преди/след вмъкването в
+// зависимост от timing, виж race condition бележката в submit
+// handler-а). Ограничения (обсъдени изрично 2026-08-20, приети):
+// споделено/динамично IP (офис WiFi, CGNAT) означава друг човек на
+// същата мрежа наследява "позната" статуса без реално да е минал
+// 2FA — приемлив компромис за малък екип, не защита срещу нападател
+// от друга мрежа (той не може да фалшифицира чуждо IP).
+async function isLoginIpKnown() {
+  if (!clientIpPromise || !thisSessionLoginTimestamp) return false;
+  const ip = await clientIpPromise;
+  if (!ip) return false; // без IP (fetch провалил се) — по-безопасно да поиска 2FA
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data } = await supabase.from("login_log")
+    .select("id").eq("user_id", user.id).eq("ip_address", ip)
+    .lt("logged_in_at", thisSessionLoginTimestamp).limit(1);
+  return (data?.length ?? 0) > 0;
 }
 
 mfaChallengeForm.addEventListener("submit", async (e) => {
@@ -1191,12 +1239,12 @@ async function openLoginHistory(userId, userName) {
   document.getElementById("login-history-title").textContent = `История на вход — ${userName}`;
   loginHistoryBackdrop.classList.add("open");
   const body = document.getElementById("login-history-body");
-  body.innerHTML = `<tr><td class="loading" colspan="3">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td class="loading" colspan="4">Зареждане…</td></tr>`;
 
   const { data, error } = await supabase.from("login_log")
-    .select("logged_in_at, logged_out_at").eq("user_id", userId).order("logged_in_at", { ascending: false }).limit(50);
-  if (error) { body.innerHTML = `<tr><td class="empty" colspan="3">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td class="empty" colspan="3">Няма записи.</td></tr>`; return; }
+    .select("logged_in_at, logged_out_at, ip_address").eq("user_id", userId).order("logged_in_at", { ascending: false }).limit(50);
+  if (error) { body.innerHTML = `<tr><td class="empty" colspan="4">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td class="empty" colspan="4">Няма записи.</td></tr>`; return; }
 
   body.innerHTML = data.map((l) => {
     const durationCell = l.logged_out_at
@@ -1206,6 +1254,7 @@ async function openLoginHistory(userId, userName) {
       <td>${formatDateTimeBg(l.logged_in_at)}</td>
       <td>${l.logged_out_at ? formatDateTimeBg(l.logged_out_at) : "—"}</td>
       <td>${durationCell}</td>
+      <td>${escapeHtml(l.ip_address ?? "—")}</td>
     </tr>`;
   }).join("");
 }
@@ -1578,55 +1627,69 @@ function renderTaskCards() {
   body.querySelectorAll(".complete-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const task = currentTasksWithLatest.find(({ t }) => t.id === btn.dataset.id)?.t;
-      const needsConfirmation = task?.obligation_types?.requires_confirmation_upload !== false;
-
-      if (task?.confirmation_status === "rejected") {
-        showBanner("Потвърждението е разпознато като ОТКАЗАНО от НАП — задачата не може да е завършена, докато не подадеш коригирана декларация и качиш ново потвърждение.");
-        return;
-      }
-
-      if (needsConfirmation) {
-        const { data: latestConfirmation } = await supabase
-          .from("attachments")
-          .select("id, client_name_mismatch, duplicate_of_attachment_id")
-          .eq("task_id", btn.dataset.id).eq("kind", "confirmation")
-          .order("uploaded_at", { ascending: false }).limit(1).maybeSingle();
-        if (!latestConfirmation) {
-          showBanner("Няма прикачено потвърждение — качи го първо (разгъни задачата), преди да я завършиш.");
-          return;
-        }
-        if (latestConfirmation.client_name_mismatch) {
-          showBanner("Потвърждението изглежда за ДРУГА фирма — провери преди да завършиш (виж бележката в детайлите на задачата).");
-          return;
-        }
-        if (latestConfirmation.duplicate_of_attachment_id) {
-          showBanner("Този входящ номер вече е качен друг път — провери дали не е дублирано, преди да завършиш.");
-          return;
-        }
-      }
-
-      // Номер на декларацията е по избор и тук — същото правило
-      // като "Подаване" в прогрес-таблицата (виж ensureSubmissionReference).
-      // Ако вече е записан (напр. през прогрес-таблицата или предходно
-      // "Маркирай подадена"), не питаме пак.
-      const refNumber = await ensureSubmissionReference(task);
-      if (refNumber === undefined) return;
-
-      // Изрично потвърждение от човек — дори системата да е разпознала
-      // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
-      if (!confirm("Сигурен ли си, че задачата е завършена?")) return;
+      const update = await buildCompletionUpdate(task);
+      if (!update) return;
       btn.disabled = true;
-      const { error } = await supabase.from("tasks").update({
-        status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
-        submission_reference_number: refNumber || null,
-        stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
-      }).eq("id", btn.dataset.id);
+      const { error } = await supabase.from("tasks").update(update).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
       logAudit("task", btn.dataset.id, "status_changed", { to: "completed" });
       showBanner("Задачата е завършена.", "ok");
       loadTasks();
     });
   });
+}
+
+// Обща логика за завършване на задача — споделена между "Завърши"
+// бутона в картите и клетката "Прието" в прогрес-таблицата (поискано
+// изрично 2026-08-21: подаването само по себе си вече НЕ завършва
+// задачата — НАП може да откаже декларацията, затова трябва отделно
+// потвърждение, че е приета без грешки). Връща patch обект за
+// tasks.update при успех, или null при отказ/грешка (банер вече
+// показан от тук).
+async function buildCompletionUpdate(task) {
+  const needsConfirmation = task?.obligation_types?.requires_confirmation_upload !== false;
+
+  if (task?.confirmation_status === "rejected") {
+    showBanner("Потвърждението е разпознато като ОТКАЗАНО от НАП — задачата не може да е завършена, докато не подадеш коригирана декларация и качиш ново потвърждение.");
+    return null;
+  }
+
+  if (needsConfirmation) {
+    const { data: latestConfirmation } = await supabase
+      .from("attachments")
+      .select("id, client_name_mismatch, duplicate_of_attachment_id")
+      .eq("task_id", task.id).eq("kind", "confirmation")
+      .order("uploaded_at", { ascending: false }).limit(1).maybeSingle();
+    if (!latestConfirmation) {
+      showBanner("Няма прикачено потвърждение — качи го първо (разгъни задачата), преди да я завършиш.");
+      return null;
+    }
+    if (latestConfirmation.client_name_mismatch) {
+      showBanner("Потвърждението изглежда за ДРУГА фирма — провери преди да завършиш (виж бележката в детайлите на задачата).");
+      return null;
+    }
+    if (latestConfirmation.duplicate_of_attachment_id) {
+      showBanner("Този входящ номер вече е качен друг път — провери дали не е дублирано, преди да завършиш.");
+      return null;
+    }
+  }
+
+  // Номер на декларацията е по избор и тук — същото правило като
+  // "Подаване" в прогрес-таблицата (виж ensureSubmissionReference).
+  // Ако вече е записан (напр. през прогрес-таблицата или предходно
+  // "Маркирай подадена"), не питаме пак.
+  const refNumber = await ensureSubmissionReference(task);
+  if (refNumber === undefined) return null;
+
+  // Изрично потвърждение от човек — дори системата да е разпознала
+  // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
+  if (!confirm("Сигурен ли си, че задачата е завършена (приета без грешки)?")) return null;
+
+  return {
+    status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
+    submission_reference_number: refNumber || null,
+    stage_creation_done: true, stage_review_done: true, stage_submission_done: true,
+  };
 }
 
 // Прогрес-таблица по образец на Controlisy — Създаване/Проверка/
@@ -1642,11 +1705,12 @@ const STAGE_COLUMNS = [
 function renderProgressTable(sorted) {
   const body = document.getElementById("progress-table-body");
   if (sorted.length === 0) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">Няма задачи по този филтър.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11" class="empty">Няма задачи по този филтър.</td></tr>`;
     document.getElementById("progress-total-pct").textContent = "";
     document.getElementById("progress-total-creation").textContent = "";
     document.getElementById("progress-total-review").textContent = "";
     document.getElementById("progress-total-submission").textContent = "";
+    document.getElementById("progress-total-accepted").textContent = "";
     document.getElementById("progress-total-payment").textContent = "";
     return;
   }
@@ -1659,6 +1723,24 @@ function renderProgressTable(sorted) {
     const cls = done ? " stage-done" : isActive ? " stage-active-timer" : "";
     const content = done ? "✓" : isActive ? "⏱" : "";
     return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${content}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
+  };
+
+  // "Прието" (поискано изрично 2026-08-21) — умишлено НЕ е част от
+  // STAGE_COLUMNS/поле в tasks, а огледало на tasks.status==='completed',
+  // по същия принцип като Платено по-долу: не е поредна механична
+  // отметка, а условие, което гейтва завършването на задачата през
+  // buildCompletionUpdate (проверка на потвърждението, качен документ и
+  // изрично човешко потвърждение — виж SPEC.md §4). Прогрес % по-горе
+  // остава само върху 3-те работни отметки ("колко работа е свършена");
+  // тази колона пита отделно "прието ли е накрая от НАП, без грешки".
+  const acceptedCell = (t) => {
+    const done = t.status === "completed";
+    const rejected = !done && t.confirmation_status === "rejected";
+    const cls = done ? " stage-done" : rejected ? " stage-rejected" : "";
+    const content = done ? "✓" : rejected ? "✗" : "";
+    const title = rejected ? ` title="Потвърждението е отказано от НАП"`
+      : !t.stage_submission_done ? ` title="Първо отбележи Подаване"` : "";
+    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="accepted" style="cursor:pointer;text-align:center"${title}>${content}</td>`;
   };
 
   // Плащането не е поле в tasks, а отделен ред в task_payments — и
@@ -1688,6 +1770,7 @@ function renderProgressTable(sorted) {
         ${stageCell(t, "stage_creation_done", "creation")}
         ${stageCell(t, "stage_review_done", "review")}
         ${stageCell(t, "stage_submission_done", "submission")}
+        ${acceptedCell(t)}
         ${paymentCell(t)}
       </tr>
     `;
@@ -1701,6 +1784,8 @@ function renderProgressTable(sorted) {
     const doneCount = sorted.filter(({ t }) => t[field]).length;
     document.getElementById(`progress-total-${key}`).textContent = `${doneCount}/${total}`;
   }
+  const acceptedCount = sorted.filter(({ t }) => t.status === "completed").length;
+  document.getElementById("progress-total-accepted").textContent = `${acceptedCount}/${total}`;
   if (sorted[0].t.obligation_types?.requires_payment) {
     const paidCount = sorted.filter(({ t }) => t.task_payments?.[0]?.paid).length;
     document.getElementById("progress-total-payment").textContent = `${paidCount}/${total}`;
@@ -1724,6 +1809,39 @@ function renderProgressTable(sorted) {
         if (error) { showBanner("Грешка при запис: " + error.message); return; }
         Object.assign(payment, paymentUpdate);
         logAudit("task_payment", paymentId, newPaid ? "marked_paid" : "marked_unpaid", { task_id: id });
+        renderTaskCards();
+        return;
+      }
+
+      // "Прието" (поискано 2026-08-21) — не е механична отметка като
+      // Създаване/Проверка/Подаване, затова не минава през общата
+      // isDone/timer логика по-долу; използва buildCompletionUpdate
+      // (същата проверка като бутона "Завърши" в картите — качено
+      // потвърждение, не отхвърлено от НАП, изрично човешко "да").
+      if (field === "accepted") {
+        if (entry.t.status === "completed") {
+          if (!confirm("Сигурен ли си, че искаш да отвориш обратно завършена задача?")) return;
+          const revert = { status: "in_progress", completed_at: null, completed_by: null };
+          const { error } = await supabase.from("tasks").update(revert).eq("id", id);
+          if (error) { showBanner("Грешка при запис: " + error.message); return; }
+          Object.assign(entry.t, revert);
+          logAudit("task", id, "status_changed", { to: "in_progress" });
+          renderObligationSummary(currentTasksWithLatest);
+          renderTaskCards();
+          return;
+        }
+        if (!entry.t.stage_submission_done) {
+          showBanner("Първо отбележи 'Подаване', преди да маркираш прието.");
+          return;
+        }
+        const update = await buildCompletionUpdate(entry.t);
+        if (!update) return;
+        const { error } = await supabase.from("tasks").update(update).eq("id", id);
+        if (error) { showBanner("Грешка при запис: " + error.message); return; }
+        Object.assign(entry.t, update);
+        logAudit("task", id, "status_changed", { to: "completed" });
+        showBanner("Задачата е завършена.", "ok");
+        renderObligationSummary(currentTasksWithLatest);
         renderTaskCards();
         return;
       }
@@ -1779,17 +1897,13 @@ function renderProgressTable(sorted) {
         }
       }
 
-      // Просто правило: "Подаване" е финалната стъпка — щом декларацията
-      // е подадена, задължението е изпълнено, независимо дали Създаване/
-      // Проверка са отделно отметнати. Това движи горното обобщено табло
-      // (то брои по tasks.status, не по отделните отметки).
-      const afterStages = { ...entry.t, ...update };
-      const allStagesDone = !!afterStages.stage_submission_done;
-      if (allStagesDone && entry.t.status !== "completed") {
-        update.status = "completed";
-        update.completed_at = new Date().toISOString();
-        update.completed_by = myProfile.id;
-      } else if (!allStagesDone && entry.t.status === "completed") {
+      // "Подаване" вече НЕ завършва автоматично задачата (поискано
+      // изрично 2026-08-21) — НАП може да откаже декларацията, затова
+      // завършването минава само през отделната колона "Прието" (виж
+      // клона field === "accepted" по-горе). Ако все пак разотметиш
+      // "Подаване" на вече завършена задача, това я преотваря — не
+      // може да е прието нещо неподадено.
+      if (field === "stage_submission_done" && !newValue && entry.t.status === "completed") {
         update.status = "in_progress";
         update.completed_at = null;
         update.completed_by = null;

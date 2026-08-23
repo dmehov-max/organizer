@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Изпращане на документи — Мехов Консулт</title>
+<style>
+  :root {
+    /* Същата палитра като index.html — виж коментара там. */
+    --paper: #f4f1e9; --ink: #2b2a25; --muted: #8b8878; --line: #e7e2d3;
+    --accent: #3f7d82; --accent-ink: #2c5f63; --accent-soft: #dfeaea;
+    --red: #bd5142; --red-soft: #f6e2dd; --green: #4c7a4a; --green-soft: #e2ecdd;
+    --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #17190f; --ink: #e7e4d8; --muted: #948f7a; --line: #2c2f26;
+      --accent: #6fb0b3; --accent-ink: #9ccdcf; --accent-soft: rgba(111,176,179,.14);
+      --red: #e2897c; --red-soft: rgba(226,137,124,.14);
+      --green: #8fbf82; --green-soft: rgba(143,191,130,.14);
+      --card: #1d201a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Noto Sans", system-ui, sans-serif;
+    display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 28px; max-width: 480px; width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,.05);
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 22px; line-height: 1.5; }
+  .dropzone {
+    border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .dropzone p { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+  .dropzone .icon { font-size: 1.8rem; }
+  input[type="file"] { display: none; }
+  #file-list { margin: 14px 0 0; padding: 0; list-style: none; }
+  #file-list li {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; font-size: .88rem;
+  }
+  #file-list .status { color: var(--muted); font-size: .8rem; margin-left: 8px; white-space: nowrap; }
+  #file-list .status.ok { color: var(--green); }
+  #file-list .status.err { color: var(--red); }
+  #file-list button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 0 4px; }
+  textarea {
+    width: 100%; margin-top: 14px; font: inherit; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); color: var(--ink); resize: vertical; min-height: 60px;
+  }
+  button.primary {
+    width: 100%; margin-top: 16px; padding: 12px; font: inherit; font-weight: 600; cursor: pointer;
+    border: none; border-radius: 10px; background: var(--accent); color: #fff;
+  }
+  button.primary:disabled { opacity: .55; cursor: default; }
+  .msg { margin-top: 16px; padding: 12px 14px; border-radius: 10px; font-size: .9rem; line-height: 1.5; }
+  .msg.ok { background: var(--green-soft); color: var(--green); }
+  .msg.err { background: var(--red-soft); color: var(--red); }
+  .loading { color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="content"><p class="loading">Зареждане…</p></div>
+  </div>
+
+<script type="module">
+// Публична страница за КЛИЕНТИ на Мехов Консулт — изпращат документи
+// (фактури, извлечения и т.н.) по линк, специфичен за тяхната фирма,
+// без да им трябва акаунт/логин. Виж supabase/functions/upload-document/
+// и миграция 0059_incoming_documents.sql за пълния контекст на дизайна.
+
+// Истинското деплойнато име е "upload---document" (виж бележката в
+// index.html до същата константа) — дръж двата файла синхронизирани.
+const UPLOAD_DOCUMENT_URL = "https://ekyvbmokklfyrjkshuuu.supabase.co/functions/v1/upload---document";
+
+const MAX_FILE_BYTES = 15 * 1024 * 1024; // синхронизирано с лимита в upload-document/index.ts
+
+const content = document.getElementById("content");
+const token = new URLSearchParams(location.search).get("t");
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]); // маха "data:...;base64," префикса
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function callUpload(body) {
+  const res = await fetch(UPLOAD_DOCUMENT_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? "Неизвестна грешка.");
+  return data;
+}
+
+if (!token) {
+  content.innerHTML = `<div class="msg err">Този линк е непълен — липсва идентификатор. Свържете се с Мехов Консулт за правилния линк.</div>`;
+} else {
+  init();
+}
+
+async function init() {
+  let clientName;
+  try {
+    const data = await callUpload({ token });
+    clientName = data.client_name;
+  } catch (e) {
+    content.innerHTML = `<div class="msg err">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <h1>Здравейте, ${escapeHtml(clientName)}</h1>
+    <p class="sub">Пуснете тук документите (фактури, извлечения, всичко за обработка) — стигат директно до счетоводителя Ви. Може да качите няколко файла наведнъж.</p>
+    <div class="dropzone" id="dz">
+      <div class="icon">📎</div>
+      <div>Пуснете файлове тук или <u>изберете от устройството</u></div>
+      <p>PDF, снимки, Excel и др. — до 15MB на файл</p>
+      <input type="file" id="file-input" multiple />
+    </div>
+    <ul id="file-list"></ul>
+    <textarea id="note" placeholder="Бележка (по избор) — напр. за кой месец е документът"></textarea>
+    <button class="primary" id="send-btn" disabled>Изпрати</button>
+    <div id="result"></div>
+  `;
+
+  const dz = document.getElementById("dz");
+  const fileInput = document.getElementById("file-input");
+  const fileListEl = document.getElementById("file-list");
+  const sendBtn = document.getElementById("send-btn");
+  const resultEl = document.getElementById("result");
+  let queued = [];
+
+  dz.addEventListener("click", () => fileInput.click());
+  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault(); dz.classList.remove("drag");
+    addFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener("change", () => { addFiles(fileInput.files); fileInput.value = ""; });
+
+  function addFiles(fileListObj) {
+    for (const f of fileListObj) {
+      if (f.size > MAX_FILE_BYTES) {
+        resultEl.innerHTML = `<div class="msg err">"${escapeHtml(f.name)}" е над 15MB — не е добавен.</div>`;
+        continue;
+      }
+      queued.push({ file: f, status: "чака" });
+    }
+    renderList();
+  }
+
+  function renderList() {
+    fileListEl.innerHTML = queued.map((q, i) => `
+      <li>
+        <span>${escapeHtml(q.file.name)}</span>
+        <span>
+          <span class="status ${q.status === "готово" ? "ok" : q.status === "грешка" ? "err" : ""}">${escapeHtml(q.status)}</span>
+          ${q.status === "чака" ? `<button data-i="${i}" title="Премахни">✕</button>` : ""}
+        </span>
+      </li>
+    `).join("");
+    fileListEl.querySelectorAll("button[data-i]").forEach((btn) => {
+      btn.addEventListener("click", () => { queued.splice(Number(btn.dataset.i), 1); renderList(); });
+    });
+    sendBtn.disabled = queued.length === 0 || queued.every((q) => q.status !== "чака");
+  }
+
+  document.getElementById("send-btn").addEventListener("click", async () => {
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Изпращане…";
+    const note = document.getElementById("note").value.trim();
+    let okCount = 0;
+
+    for (const q of queued) {
+      if (q.status !== "чака") continue;
+      try {
+        const base64 = await fileToBase64(q.file);
+        await callUpload({ token, filename: q.file.name, file_base64: base64, note: note || undefined });
+        q.status = "готово";
+        okCount++;
+      } catch (e) {
+        q.status = "грешка";
+      }
+      renderList();
+    }
+
+    sendBtn.textContent = "Изпрати";
+    if (okCount > 0) {
+      resultEl.innerHTML = `<div class="msg ok">Получихме ${okCount} ${okCount === 1 ? "документ" : "документа"}. Благодарим — счетоводителят Ви ще го обработи.</div>`;
+      document.getElementById("note").value = "";
+    }
+    if (queued.some((q) => q.status === "грешка")) {
+      resultEl.innerHTML += `<div class="msg err">Някои файлове не успяха да се изпратят — опитайте пак или пишете на счетоводителя си.</div>`;
+    }
+    queued = queued.filter((q) => q.status !== "готово");
+    renderList();
+  });
+}
+</script>
+</body>
+</html>

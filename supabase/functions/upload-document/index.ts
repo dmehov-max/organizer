@@ -9,10 +9,19 @@
 // изключена, като create-user/generate-tasks) → проверява токена
 // СЪРВЪРНО срещу clients.upload_token → пише със service_role.
 //
-// Две режима на едно и също POST тяло:
-//  - { token } без file_base64 → само "проверка на линка", връща
-//    името на фирмата за приветствие на upload.html, НИЩО не пише.
-//  - { token, filename, file_base64, note? } → реално качване.
+// Три режима на едно и също POST тяло:
+//  - { token } без file_base64/source_url → само "проверка на
+//    линка", връща името на фирмата за приветствие на upload.html,
+//    НИЩО не пише.
+//  - { token, filename, file_base64, note? } → реално качване от
+//    клиента (source='client_upload').
+//  - { token, filename, source_url, note? } БЕЗ file_base64 →
+//    "засечено по имейл" (source='email_detected', виж 0060) — не
+//    мести файла, само логва находка с линк към Gmail писмото.
+//    Токенът тук е СЪЩИЯТ upload_token на клиента (0059) — извиква се
+//    не от клиента, а от ръчна "проверка на пощата" (виж
+//    supabase/functions/upload-document/README.md), четен read-only
+//    директно от базата за случая.
 //
 // Съзнателно НЕ проверява дали клиентът Е активен (active=false) —
 // дори неактивен клиент може still да е изпратил документ, по-добре
@@ -64,7 +73,7 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const { token, filename, file_base64, note } = await req.json();
+    const { token, filename, file_base64, note, source_url } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Липсва линк-токен." }), { status: 400, headers: corsHeaders });
     }
@@ -78,7 +87,26 @@ async function handler(req: Request): Promise<Response> {
 
     // Режим "само проверка на линка" — upload.html го вика при
     // зареждане, за да поздрави клиента с името на фирмата.
-    if (!file_base64) {
+    if (!file_base64 && !source_url) {
+      return new Response(JSON.stringify({ ok: true, client_name: client.name }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Режим "засечено по имейл" (0060) — само лог, файлът остава в
+    // Gmail, счетоводителят го отваря през source_url. Проверено
+    // ПРЕДИ обичайното качване, защото това клонче няма file_base64.
+    if (!file_base64 && source_url) {
+      if (!filename) {
+        return new Response(JSON.stringify({ error: "Липсва име на файла." }), { status: 400, headers: corsHeaders });
+      }
+      const { error: insErr } = await admin.from("incoming_documents").insert({
+        client_id: client.id, original_filename: filename, note: note || null,
+        source: "email_detected", source_url,
+      });
+      if (insErr) {
+        return new Response(JSON.stringify({ error: "Записът се провали: " + insErr.message }), { status: 500, headers: corsHeaders });
+      }
       return new Response(JSON.stringify({ ok: true, client_name: client.name }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

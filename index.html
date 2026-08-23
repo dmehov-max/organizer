@@ -671,6 +671,13 @@
       </div>
       <div class="form-table" style="margin-top:20px">
         <div class="form-row" style="align-items:start">
+          <label for="ec-contact-emails" style="margin-top:8px">Имейли на клиента</label>
+          <div>
+            <textarea id="ec-contact-emails" rows="2" placeholder="По един на ред — от тях засичаме документи, изпратени по имейл" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical"></textarea>
+            <div class="hint" style="margin-top:4px">Ползва се, за да засичаме документи, пратени директно по имейл (не през линка за качване) — виж таб "Входящи документи".</div>
+          </div>
+        </div>
+        <div class="form-row" style="align-items:start">
           <label for="ec-notes" style="margin-top:8px">Забележка</label>
           <textarea id="ec-notes" rows="3" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical"></textarea>
         </div>
@@ -2697,7 +2704,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails").eq("id", clientId).single();
 
   // Линк за клиента да качва документи сам (upload.html?t=<upload_token>,
   // без логин от негова страна) — виж миграция 0059. Копира в клипборда,
@@ -2762,6 +2769,7 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-city").value = clientRow?.address_city ?? "";
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
   document.getElementById("ec-notes").value = clientRow?.notes ?? "";
+  document.getElementById("ec-contact-emails").value = (clientRow?.contact_emails ?? []).join("\n");
   document.getElementById("ec-tasks-start").value = clientRow?.tasks_start_date ?? "";
   currentEditClientType = clientRow?.type ?? "legal_entity";
   updateEcEikHint();
@@ -2776,10 +2784,16 @@ async function toggleClientSettings(tr) {
     const street = document.getElementById("ec-street").value.trim();
     const tasksStart = document.getElementById("ec-tasks-start").value;
     const notes = document.getElementById("ec-notes").value.trim();
+    // По ред, изчистени от празни редове/заобикалящи интервали — Gmail
+    // адресите не са case-sensitive по домейн, но пазим точно както е
+    // въведено (потребителската част технически е case-sensitive, а и
+    // по-лесно се разпознава от counter-а при преглед).
+    const contactEmails = document.getElementById("ec-contact-emails").value
+      .split("\n").map((s) => s.trim()).filter(Boolean);
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
     if (!updateEcEikHint()) { showBanner(`${currentEditClientType === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(currentEditClientType)} цифри — не е записано.`); return; }
     const { error } = await supabase.from("clients")
-      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, notes: notes || null, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
+      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, notes: notes || null, contact_emails: contactEmails, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
@@ -2792,7 +2806,7 @@ async function toggleClientSettings(tr) {
   // всяко отваряне (и щеше да пише в СТАРИЯ clientId при следващо
   // blur). Присвояването сменя предишния, само последният важи —
   // същият похват, ползван по-долу за vatCb.onchange/activeCb.onchange.
-  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start", "ec-notes"].forEach((id) => {
+  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start", "ec-notes", "ec-contact-emails"].forEach((id) => {
     document.getElementById(id).onblur = saveCompanyData;
   });
 
@@ -3414,18 +3428,24 @@ async function loadIncomingDocuments() {
 
   const statusFilter = document.getElementById("incoming-status-filter").value;
   let query = supabase.from("incoming_documents")
-    .select("id, original_filename, storage_path, note, status, received_at, clients(name)")
+    .select("id, original_filename, storage_path, note, status, received_at, source, source_url, clients(name)")
     .order("received_at", { ascending: false });
   if (statusFilter) query = query.eq("status", statusFilter);
   const { data, error } = await query;
   if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
   if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма документи по този филтър.</td></tr>`; return; }
 
+  // Два източника (0060): 'client_upload' — файлът е в нашия Storage,
+  // кликът показва signed URL; 'email_detected' — само лог от ръчна
+  // проверка на пощата, файлът си стои в Gmail, линкът отваря писмото
+  // директно там (storage_path е null за тези редове).
   body.innerHTML = data.map((d, i) => `
     <tr>
       <td>${i + 1}</td>
       <td>${escapeHtml(d.clients?.name ?? "?")}</td>
-      <td><a class="linklike incoming-view-btn" data-path="${escapeHtml(d.storage_path)}">${escapeHtml(d.original_filename)}</a></td>
+      <td>${d.source === "email_detected"
+        ? `<a class="linklike" href="${escapeHtml(d.source_url)}" target="_blank" rel="noopener">✉️ ${escapeHtml(d.original_filename)}</a>`
+        : `<a class="linklike incoming-view-btn" data-path="${escapeHtml(d.storage_path)}">${escapeHtml(d.original_filename)}</a>`}</td>
       <td>${d.note ? escapeHtml(d.note) : "<span style=\"color:var(--muted)\">—</span>"}</td>
       <td>${formatDateBg(d.received_at)}</td>
       <td><span class="pill pill-${d.status === "done" ? "completed" : "waiting"}">${d.status === "done" ? "Обработен" : "Нов"}</span></td>

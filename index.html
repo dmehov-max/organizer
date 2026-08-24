@@ -152,6 +152,11 @@
     display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
   }
   .modal-backdrop.open { display: flex; }
+  /* Заключва фоновата страница да не скролва под модала — с висок
+     модал (напр. досието на клиент) без това се виждаха ДВА скрола
+     едновременно (на страницата + вътре в модала), объркващо при
+     работа (реален потребителски feedback 2026-08-24). */
+  body:has(.modal-backdrop.open) { overflow: hidden; }
   .modal {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     width: 100%; max-width: 420px; padding: 22px 24px;
@@ -159,6 +164,11 @@
     max-height: 88vh; overflow-y: auto;
   }
   .modal.modal-wide { max-width: 640px; }
+  /* По-широк специално за клиентското досие — сега носи два еднакво
+     широки detail-grid стълба (Досие/Настройки) плюс досие-флаговете
+     ВЪТРЕ в първия стълб (свои 2 колони, .dossier-panel по-долу) —
+     на 640px ставаше твърде тясно (2026-08-24). */
+  #edit-client-backdrop .modal.modal-wide { max-width: 820px; }
   .modal h2 { font-size: 1.05rem; margin: 0 0 18px; }
   /* полетата подредени като таблица — етикет отляво, стойност
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
@@ -223,9 +233,11 @@
   .detail-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; }
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: .85rem; }
   @media (max-width: 560px) { .detail-grid { grid-template-columns: 1fr; } }
-  /* Клиентският модал — Досие/Настройки едно под друго, не в две
-     колони (по изрична заявка), за разлика от детайлите на задача. */
-  #edit-client-backdrop .detail-grid { grid-template-columns: 1fr; }
+  /* Клиентският модал — Досие/Настройки бяха едно под друго (по
+     изрична заявка), но с новите полета (имейли на клиента и др.)
+     модалът стана прекалено висок за удобна работа (feedback
+     2026-08-24) — вече наследява двуколонния .detail-grid по-горе,
+     както детайлите на задача (под 560px пак пада на една колона). */
   /* Досие флаговете — по две на ред, "Активен" (отделен елемент,
      извън тази мрежа) остава сам на своя ред отдолу. */
   #dossier-panel { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; }
@@ -644,11 +656,15 @@
             </div>
           </div>
           <div class="form-row"><label for="ec-responsible">Отговорник</label><select id="ec-responsible"></select></div>
-          <div class="form-row"><label for="ec-city">Град</label><input id="ec-city" /></div>
-          <div class="form-row"><label for="ec-street">Улица</label><input id="ec-street" /></div>
+          <div class="form-row"><label>Адрес</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <input id="ec-city" placeholder="Град" />
+              <input id="ec-street" placeholder="Улица" />
+            </div>
+          </div>
           <div class="form-row"><label for="ec-tasks-start">Генерирай задачи от</label>
             <div><input id="ec-tasks-start" type="date" />
-              <div class="hint" style="margin-top:4px">Задачи със срок преди тази дата НЕ се генерират автоматично — по подразбиране датата на добавяне в Органайзер, промени я само ако фирмата реално дължи стари, отминали срокове.</div>
+              <div class="hint" style="margin-top:3px;font-size:.74rem;line-height:1.3" title="Задачи със срок преди тази дата НЕ се генерират автоматично — по подразбиране датата на добавяне в Органайзер.">Промени само ако фирмата дължи стари, отминали срокове.</div>
             </div>
           </div>
         </div>
@@ -663,6 +679,13 @@
             <label for="active-cb-panel">Активен клиент</label>
           </div>
           <button type="button" id="copy-upload-link-btn" class="small" style="margin-top:10px">Копирай линк за качване от клиента</button>
+          <div class="form-row" style="align-items:start;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+            <label for="ec-contact-emails" style="margin-top:8px">Имейли</label>
+            <div>
+              <textarea id="ec-contact-emails" rows="2" placeholder="По един на ред" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical;width:100%"></textarea>
+              <div class="hint" style="margin-top:3px;font-size:.74rem;line-height:1.3" title="Ползва се, за да засичаме документи, пратени директно по имейл (не през линка за качване) — виж таб Входящи документи.">Засичаме по тях документи, пратени по имейл.</div>
+            </div>
+          </div>
         </div>
         <div class="detail-block">
           <h4>Настройки — кои задължения важат</h4>
@@ -670,13 +693,6 @@
         </div>
       </div>
       <div class="form-table" style="margin-top:20px">
-        <div class="form-row" style="align-items:start">
-          <label for="ec-contact-emails" style="margin-top:8px">Имейли на клиента</label>
-          <div>
-            <textarea id="ec-contact-emails" rows="2" placeholder="По един на ред — от тях засичаме документи, изпратени по имейл" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical"></textarea>
-            <div class="hint" style="margin-top:4px">Ползва се, за да засичаме документи, пратени директно по имейл (не през линка за качване) — виж таб "Входящи документи".</div>
-          </div>
-        </div>
         <div class="form-row" style="align-items:start">
           <label for="ec-notes" style="margin-top:8px">Забележка</label>
           <textarea id="ec-notes" rows="3" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical"></textarea>

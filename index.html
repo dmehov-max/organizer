@@ -737,6 +737,17 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="confirm-modal-backdrop" style="z-index:60">
+    <div class="modal" style="max-width:380px">
+      <p id="confirm-modal-message" style="margin:0 0 14px;white-space:pre-wrap"></p>
+      <input id="confirm-modal-input" style="display:none;width:100%;margin-bottom:14px" />
+      <div class="modal-actions">
+        <button type="button" id="confirm-modal-cancel">Отказ</button>
+        <button class="primary" type="button" id="confirm-modal-ok">Добре</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="client-chat-backdrop">
     <div class="modal">
       <h2 id="client-chat-title">Съобщения</h2>
@@ -861,6 +872,54 @@ function showBanner(msg, kind = "err") {
   bannerArea.scrollIntoView({ behavior: "smooth", block: "center" });
   if (kind === "ok") setTimeout(() => (bannerArea.innerHTML = ""), 3500);
 }
+
+// Собствен confirm()/prompt() вместо браузърните нативни — конкретен
+// потребителски бъг репорт (2026-08-24): клетката "Прието" в
+// прогрес-таблицата "не работеше", реалната причина беше че веригата
+// минава през native prompt()/confirm() (номер на декларация, после
+// финално потвърждение) и на remote desktop/споделен екран (Google
+// Meet сесия, видяна по-рано) такива диалози понякога изобщо не се
+// показват видимо или се отхвърлят тихо от средата — изглежда все
+// едно бутонът не прави нищо. Засега сменени само в тази конкретна
+// верига (buildCompletionUpdate/ensureSubmissionReference) — другите
+// confirm()/prompt() в приложението остават нативни, освен ако не се
+// докладва подобен проблем и там.
+const confirmModalBackdrop = document.getElementById("confirm-modal-backdrop");
+const confirmModalMessage = document.getElementById("confirm-modal-message");
+const confirmModalInput = document.getElementById("confirm-modal-input");
+const confirmModalOk = document.getElementById("confirm-modal-ok");
+const confirmModalCancel = document.getElementById("confirm-modal-cancel");
+
+function openConfirmModal({ message, withInput = false, inputValue = "" }) {
+  return new Promise((resolve) => {
+    confirmModalMessage.textContent = message;
+    confirmModalInput.style.display = withInput ? "" : "none";
+    confirmModalInput.value = inputValue;
+    confirmModalBackdrop.classList.add("open");
+    if (withInput) setTimeout(() => confirmModalInput.focus(), 50);
+
+    const cleanup = (result) => {
+      confirmModalBackdrop.classList.remove("open");
+      confirmModalOk.onclick = null;
+      confirmModalCancel.onclick = null;
+      confirmModalBackdrop.onclick = null;
+      document.removeEventListener("keydown", onKeydown);
+      resolve(result);
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") cleanup(withInput ? null : false);
+      if (e.key === "Enter" && withInput) cleanup(confirmModalInput.value);
+    };
+    confirmModalOk.onclick = () => cleanup(withInput ? confirmModalInput.value : true);
+    confirmModalCancel.onclick = () => cleanup(withInput ? null : false);
+    confirmModalBackdrop.onclick = (e) => { if (e.target === confirmModalBackdrop) cleanup(withInput ? null : false); };
+    document.addEventListener("keydown", onKeydown);
+  });
+}
+// Връща true/false — заместител на window.confirm().
+const customConfirm = (message) => openConfirmModal({ message });
+// Връща въведения текст, или null при "Отказ" — заместител на window.prompt().
+const customPrompt = (message, defaultValue = "") => openConfirmModal({ message, withInput: true, inputValue: defaultValue });
 
 function todayISO() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
@@ -1612,7 +1671,7 @@ function populateObligationFilter(withLatest) {
 async function ensureSubmissionReference(task) {
   if (!task) return undefined;
   if (task.submission_reference_number) return task.submission_reference_number;
-  const refNumber = prompt("Номер на подадената декларация (по избор):", "");
+  const refNumber = await customPrompt("Номер на подадената декларация (по избор):", "");
   if (refNumber === null) return undefined; // отказано
   const trimmed = refNumber.trim();
   if (!trimmed) return ""; // изрично без номер — разрешено
@@ -1620,7 +1679,7 @@ async function ensureSubmissionReference(task) {
     t.id !== task.id && t.submission_reference_number === trimmed);
   if (duplicate) {
     const dupLabel = `${duplicate.t.clients?.name ?? "?"} (${duplicate.t.period_label})`;
-    if (!confirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return undefined;
+    if (!await customConfirm(`Номер ${trimmed} вече е използван за ${dupLabel}. Сигурен ли си, че искаш да го запишеш пак тук?`)) return undefined;
   }
   return trimmed;
 }
@@ -1807,7 +1866,7 @@ async function buildCompletionUpdate(task) {
 
   // Изрично потвърждение от човек — дори системата да е разпознала
   // "приета" в потвърждението, не затваряме автоматично (SPEC.md §4).
-  if (!confirm("Сигурен ли си, че задачата е завършена (приета без грешки)?")) return null;
+  if (!await customConfirm("Сигурен ли си, че задачата е завършена (приета без грешки)?")) return null;
 
   return {
     status: "completed", completed_at: new Date().toISOString(), completed_by: myProfile.id,
@@ -1944,7 +2003,7 @@ function renderProgressTable(sorted) {
       // потвърждение, не отхвърлено от НАП, изрично човешко "да").
       if (field === "accepted") {
         if (entry.t.status === "completed") {
-          if (!confirm("Сигурен ли си, че искаш да отвориш обратно завършена задача?")) return;
+          if (!await customConfirm("Сигурен ли си, че искаш да отвориш обратно завършена задача?")) return;
           const revert = { status: "in_progress", completed_at: null, completed_by: null };
           const { error } = await supabase.from("tasks").update(revert).eq("id", id);
           if (error) { showBanner("Грешка при запис: " + error.message); return; }

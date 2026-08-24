@@ -155,8 +155,10 @@
   /* Заключва фоновата страница да не скролва под модала — с висок
      модал (напр. досието на клиент) без това се виждаха ДВА скрола
      едновременно (на страницата + вътре в модала), объркващо при
-     работа (реален потребителски feedback 2026-08-24). */
-  body:has(.modal-backdrop.open) { overflow: hidden; }
+     работа (реален потребителски feedback 2026-08-24). И на html, И
+     на body — кой от двата е реалният "scrolling element" зависи от
+     браузъра/DOCTYPE-а, само body:has() не стигаше при повторен тест. */
+  html:has(.modal-backdrop.open), body:has(.modal-backdrop.open) { overflow: hidden; }
   .modal {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     width: 100%; max-width: 420px; padding: 22px 24px;
@@ -169,6 +171,21 @@
      ВЪТРЕ в първия стълб (свои 2 колони, .dossier-panel по-долу) —
      на 640px ставаше твърде тясно (2026-08-24). */
   #edit-client-backdrop .modal.modal-wide { max-width: 820px; }
+  /* Компактен режим само за досието на клиента — целта е да се събере
+     на един екран без вложен скрол в "Настройки" (потребителски
+     feedback 2026-08-24: "да няма 2 скрола и всичко да се вижда на
+     1 екран"). По-малки отстояния навсякъде в модала, settings-panel
+     вече НЯМА собствен max-height/overflow (виж HTML) — само ЕДИН
+     общ скрол на целия модал остава, ако съдържанието не се събере. */
+  #edit-client-backdrop .modal { padding: 16px 20px; max-height: 94vh; }
+  #edit-client-backdrop h2 { margin-bottom: 10px; }
+  #edit-client-backdrop .detail-block { margin-bottom: 12px; }
+  #edit-client-backdrop .form-table { gap: 8px; }
+  #edit-client-backdrop .detail-grid { gap: 14px; }
+  #edit-client-backdrop .eik-vat-block { padding: 8px 12px; }
+  #edit-client-backdrop .vat-toggle { margin-top: 8px; padding-top: 8px; }
+  #edit-client-backdrop .check-row { padding: 3px 0; }
+  #edit-client-backdrop #dossier-panel { row-gap: 0; }
   .modal h2 { font-size: 1.05rem; margin: 0 0 18px; }
   /* полетата подредени като таблица — етикет отляво, стойност
      отдясно на всеки ред, вместо разхвърляна мрежа от кутийки. */
@@ -651,7 +668,7 @@
     <div class="modal modal-wide">
       <h2 id="edit-client-title">Клиент</h2>
 
-      <div class="detail-block" style="margin-bottom:20px">
+      <div class="detail-block">
         <h4>Данни на фирмата</h4>
         <div class="form-table">
           <div class="form-row"><label for="ec-name">Име</label><input id="ec-name" /></div>
@@ -705,7 +722,7 @@
         </div>
         <div class="detail-block">
           <h4>Настройки — кои задължения важат</h4>
-          <div id="settings-panel" style="max-height:320px;overflow-y:auto">Зареждане…</div>
+          <div id="settings-panel">Зареждане…</div>
         </div>
       </div>
       <div class="form-table" style="margin-top:20px">
@@ -835,6 +852,13 @@ const bannerArea = document.getElementById("banner-area");
 
 function showBanner(msg, kind = "err") {
   bannerArea.innerHTML = `<div class="banner ${kind}">${msg}</div>`;
+  // banner-area е най-горе на страницата — при клик дълбоко в дълга
+  // таблица (напр. прогрес-таблицата с много клиенти) банерът излизаше
+  // извън видимата част и изглеждаше все едно нищо не се е случило
+  // при клик (реален потребителски feedback 2026-08-24, за клетката
+  // "Прието" — всъщност съобщението "Няма прикачено потвърждение..."
+  // си показваше, просто невидимо).
+  bannerArea.scrollIntoView({ behavior: "smooth", block: "center" });
   if (kind === "ok") setTimeout(() => (bannerArea.innerHTML = ""), 3500);
 }
 

@@ -199,6 +199,19 @@
   .form-row input, .form-row select { width: 100%; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
+  /* --- чат с клиента (client-chat-backdrop) — огледално на балончетата
+     в upload.html, но "staff" балончето тук е нашето (accent), а
+     "client" е тяхното (paper) — обратно на клиентската страница. --- */
+  #client-chat-thread { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-bottom: 14px; padding-right: 2px; }
+  #client-chat-thread:empty::after { content: "Няма съобщения още."; color: var(--muted); font-size: .85rem; }
+  .bubble { max-width: 82%; padding: 8px 12px; border-radius: 12px; font-size: .88rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  .bubble.staff { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  .bubble.client { align-self: flex-start; background: var(--paper); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .bubble .time { display: block; font-size: .68rem; opacity: .7; margin-top: 3px; }
+  .composer { display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { margin: 0; min-height: 42px; max-height: 120px; flex: 1 1 auto; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); resize: vertical; }
+  .composer button { flex: 0 0 auto; width: auto; padding: 9px 16px; }
+
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
   .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
@@ -355,7 +368,7 @@
       <span class="tab-divider"></span>
       <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1"/><path d="M5.5 4.5h1M9.5 4.5h1M5.5 7.5h1M9.5 7.5h1M5.5 10.5h1M9.5 10.5h1"/><path d="M6.5 14.5v-3h3v3"/></svg>
-        Клиенти
+        Клиенти<span class="tab-badge" id="messages-badge" style="display:none"></span>
       </button>
       <button class="tab" data-tab="users" id="users-tab-btn" style="display:none">
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5.5" r="2"/><path d="M2.5 13c0-2 1.5-3.5 3.5-3.5s3.5 1.5 3.5 3.5"/><circle cx="11.5" cy="5.8" r="1.6"/><path d="M9.7 9.8c.4-.2.9-.3 1.3-.3 1.8 0 3.1 1.3 3.1 3.1"/></svg>
@@ -678,7 +691,10 @@
             <label class="switch"><input type="checkbox" id="active-cb-panel" /><span class="switch-track"></span></label>
             <label for="active-cb-panel">Активен клиент</label>
           </div>
-          <button type="button" id="copy-upload-link-btn" class="small" style="margin-top:10px">Копирай линк за качване от клиента</button>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button type="button" id="copy-upload-link-btn" class="small">Копирай линк за качване от клиента</button>
+            <button type="button" id="open-client-chat-btn" class="small">Съобщения<span class="tab-badge" id="client-chat-badge" style="display:none;margin-left:5px"></span></button>
+          </div>
           <div class="form-row" style="align-items:start;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
             <label for="ec-contact-emails" style="margin-top:8px">Имейли</label>
             <div>
@@ -700,6 +716,20 @@
       </div>
       <div class="modal-actions">
         <button type="button" id="close-edit-client-btn">Затвори</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="client-chat-backdrop">
+    <div class="modal">
+      <h2 id="client-chat-title">Съобщения</h2>
+      <div id="client-chat-thread"></div>
+      <form id="client-chat-form" class="composer">
+        <textarea id="client-chat-input" placeholder="Напишете отговор до клиента…" rows="1"></textarea>
+        <button class="primary" type="submit">Изпрати</button>
+      </form>
+      <div class="modal-actions">
+        <button type="button" id="close-client-chat-btn">Затвори</button>
       </div>
     </div>
   </div>
@@ -1086,6 +1116,7 @@ async function enterApp() {
 
   loadTasks();
   refreshIncomingBadge();
+  refreshMessagesBadge();
   refreshMfaSetupStatus({ autoPrompt: true });
   resumeOrCloseStaleTimer();
 }
@@ -2734,6 +2765,8 @@ async function toggleClientSettings(tr) {
       showBanner("Не успях да копирам автоматично — линкът: " + url);
     }
   };
+  document.getElementById("open-client-chat-btn").onclick = () => openClientChat(clientId, clientName);
+  refreshClientChatBadge(clientId);
 
   // Смяна на отговорника — поискано изрично (2026-08-18). Отначало
   // само admin можеше да редактира тук; същия ден по-късно е
@@ -3496,6 +3529,86 @@ async function loadIncomingDocuments() {
 }
 
 document.getElementById("incoming-status-filter").addEventListener("change", loadIncomingDocuments);
+
+// ---------------- Чат с клиента (0061) ----------------
+// Двупосочна нишка (client_messages) — огледална на upload.html от
+// страна на клиента. Тук пишем директно през supabase-js (authenticated,
+// RLS-scoped), не през Edge Function — за разлика от клиентската
+// страница, тук вече имаме сесия.
+
+let currentChatClientId = null;
+const clientChatBackdrop = document.getElementById("client-chat-backdrop");
+
+function formatChatTime(iso) {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString("bg-BG", { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? time : `${formatDateBg(iso)} ${time}`;
+}
+
+async function refreshMessagesBadge() {
+  const { count } = await supabase
+    .from("client_messages").select("id", { count: "exact", head: true })
+    .eq("sender", "client").eq("read_by_staff", false);
+  const badge = document.getElementById("messages-badge");
+  if (count) { badge.textContent = count; badge.style.display = ""; }
+  else { badge.style.display = "none"; }
+}
+
+async function refreshClientChatBadge(clientId) {
+  const { count } = await supabase
+    .from("client_messages").select("id", { count: "exact", head: true })
+    .eq("client_id", clientId).eq("sender", "client").eq("read_by_staff", false);
+  const badge = document.getElementById("client-chat-badge");
+  if (count) { badge.textContent = count; badge.style.display = ""; }
+  else { badge.style.display = "none"; }
+}
+
+async function openClientChat(clientId, clientName) {
+  currentChatClientId = clientId;
+  document.getElementById("client-chat-title").textContent = `Съобщения — ${clientName}`;
+  document.getElementById("client-chat-thread").innerHTML = `<div class="loading">Зареждане…</div>`;
+  clientChatBackdrop.classList.add("open");
+  await loadClientChat(clientId);
+}
+
+async function loadClientChat(clientId) {
+  const threadEl = document.getElementById("client-chat-thread");
+  const { data, error } = await supabase.from("client_messages")
+    .select("id, sender, body, created_at").eq("client_id", clientId).order("created_at", { ascending: true });
+  if (error) { threadEl.innerHTML = `<div class="empty">Грешка: ${error.message}</div>`; return; }
+  threadEl.innerHTML = (data ?? []).map((m) => `
+    <div class="bubble ${m.sender}">${escapeHtml(m.body)}<span class="time">${formatChatTime(m.created_at)}</span></div>
+  `).join("");
+  threadEl.scrollTop = threadEl.scrollHeight;
+
+  // Клиентските съобщения се маркират прочетени точно когато admin/
+  // счетоводителят отвори нишката — не по-рано (badge-ът трябва да
+  // остане верен индикатор "някой още не е видял това").
+  const unreadIds = (data ?? []).filter((m) => m.sender === "client").map((m) => m.id);
+  if (unreadIds.length) {
+    await supabase.from("client_messages").update({ read_by_staff: true }).in("id", unreadIds);
+    refreshMessagesBadge();
+    refreshClientChatBadge(clientId);
+  }
+}
+
+document.getElementById("close-client-chat-btn").addEventListener("click", () => clientChatBackdrop.classList.remove("open"));
+clientChatBackdrop.addEventListener("click", (e) => { if (e.target === clientChatBackdrop) clientChatBackdrop.classList.remove("open"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && clientChatBackdrop.classList.contains("open")) clientChatBackdrop.classList.remove("open"); });
+
+document.getElementById("client-chat-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("client-chat-input");
+  const body = input.value.trim();
+  if (!body || !currentChatClientId) return;
+  const { error } = await supabase.from("client_messages").insert({
+    client_id: currentChatClientId, sender: "staff", staff_id: myProfile.id, body, read_by_staff: true,
+  });
+  if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
+  input.value = "";
+  await loadClientChat(currentChatClientId);
+});
 
 // ---------------- AI помощник ----------------
 

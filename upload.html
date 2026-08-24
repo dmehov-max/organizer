@@ -63,6 +63,21 @@
   .msg.ok { background: var(--green-soft); color: var(--green); }
   .msg.err { background: var(--red-soft); color: var(--red); }
   .loading { color: var(--muted); font-size: .9rem; }
+
+  /* --- нишка (чат + документи, слети хронологично) --- */
+  #thread { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; margin-bottom: 18px; padding-right: 2px; }
+  #thread:empty { display: none; }
+  .bubble { max-width: 82%; padding: 8px 12px; border-radius: 12px; font-size: .88rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  .bubble.client { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  .bubble.staff { align-self: flex-start; background: var(--paper); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .bubble.staff .who { display: block; font-size: .72rem; font-weight: 700; color: var(--accent-ink); margin-bottom: 2px; }
+  .bubble.file { align-self: flex-end; background: var(--accent-soft); color: var(--accent-ink); border-bottom-right-radius: 3px; display: flex; align-items: center; gap: 6px; }
+  .bubble .time { display: block; font-size: .68rem; opacity: .7; margin-top: 3px; }
+  .composer { display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { margin-top: 0; min-height: 42px; max-height: 120px; flex: 1 1 auto; }
+  .composer button { flex: 0 0 auto; width: auto; margin-top: 0; padding: 11px 16px; }
+  .section-label { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 8px; font-weight: 600; }
+  .section-label:first-of-type { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -79,6 +94,10 @@
 // Истинското деплойнато име е "upload---document" (виж бележката в
 // index.html до същата константа) — дръж двата файла синхронизирани.
 const UPLOAD_DOCUMENT_URL = "https://ekyvbmokklfyrjkshuuu.supabase.co/functions/v1/upload---document";
+// TODO (Дойчин): смени с реалното деплойнато име на client-messages
+// (виж supabase/functions/client-messages/README.md) — пази синхронизирано с index.html.
+const CLIENT_MESSAGES_URL = "https://ekyvbmokklfyrjkshuuu.supabase.co/functions/v1/client-messages";
+const THREAD_POLL_MS = 30000; // тих auto-refresh, за да усеща клиентът отговора като "жив" чат
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024; // синхронизирано с лимита в upload-document/index.ts
 
@@ -98,13 +117,23 @@ function fileToBase64(file) {
   });
 }
 
-async function callUpload(body) {
-  const res = await fetch(UPLOAD_DOCUMENT_URL, {
+async function postJson(url, body) {
+  const res = await fetch(url, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? "Неизвестна грешка.");
   return data;
+}
+const callUpload = (body) => postJson(UPLOAD_DOCUMENT_URL, body);
+const callMessages = (body) => postJson(CLIENT_MESSAGES_URL, body);
+
+function formatTimeBg(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString("bg-BG", { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? time : `${d.toLocaleDateString("bg-BG")} ${time}`;
 }
 
 if (!token) {
@@ -125,7 +154,13 @@ async function init() {
 
   content.innerHTML = `
     <h1>Здравейте, ${escapeHtml(clientName)}</h1>
-    <p class="sub">Пуснете тук документите (фактури, извлечения, всичко за обработка) — стигат директно до счетоводителя Ви. Може да качите няколко файла наведнъж.</p>
+    <p class="sub">Пишете съобщение или пуснете документи (фактури, извлечения, всичко за обработка) — стигат директно до счетоводителя Ви.</p>
+    <div id="thread"></div>
+    <form id="msg-form" class="composer">
+      <textarea id="msg-input" placeholder="Напишете съобщение…" rows="1"></textarea>
+      <button class="primary" type="submit" id="msg-send-btn">Изпрати</button>
+    </form>
+    <div class="section-label">Или прикачете документ</div>
     <div class="dropzone" id="dz">
       <div class="icon">📎</div>
       <div>Пуснете файлове тук или <u>изберете от устройството</u></div>
@@ -133,17 +168,69 @@ async function init() {
       <input type="file" id="file-input" multiple />
     </div>
     <ul id="file-list"></ul>
-    <textarea id="note" placeholder="Бележка (по избор) — напр. за кой месец е документът"></textarea>
-    <button class="primary" id="send-btn" disabled>Изпрати</button>
+    <textarea id="note" placeholder="Бележка към документа (по избор) — напр. за кой месец е"></textarea>
+    <button class="primary" id="send-btn" disabled>Изпрати документ(и)</button>
     <div id="result"></div>
   `;
 
+  const threadEl = document.getElementById("thread");
   const dz = document.getElementById("dz");
   const fileInput = document.getElementById("file-input");
   const fileListEl = document.getElementById("file-list");
   const sendBtn = document.getElementById("send-btn");
   const resultEl = document.getElementById("result");
   let queued = [];
+
+  // Слива текстовите съобщения и историята на качените документи в
+  // една хронологична нишка — визуално са различни "балончета", но
+  // делят едно и също усещане за чат (искане на клиента 2026-08-24).
+  function renderThread(messages, documents) {
+    const items = [
+      ...messages.map((m) => ({ kind: m.sender, at: m.created_at, text: m.body })),
+      ...documents.map((d) => ({ kind: "file", at: d.received_at, text: d.original_filename, status: d.status })),
+    ].sort((a, b) => new Date(a.at) - new Date(b.at));
+    threadEl.innerHTML = items.map((it) => {
+      if (it.kind === "staff") {
+        return `<div class="bubble staff"><span class="who">Мехов Консулт</span>${escapeHtml(it.text)}<span class="time">${formatTimeBg(it.at)}</span></div>`;
+      }
+      if (it.kind === "file") {
+        return `<div class="bubble file">📎 ${escapeHtml(it.text)}${it.status === "done" ? " ✓" : ""}<span class="time">${formatTimeBg(it.at)}</span></div>`;
+      }
+      return `<div class="bubble client">${escapeHtml(it.text)}<span class="time">${formatTimeBg(it.at)}</span></div>`;
+    }).join("");
+    threadEl.scrollTop = threadEl.scrollHeight;
+  }
+
+  async function refreshThread() {
+    try {
+      const data = await callMessages({ token });
+      renderThread(data.messages ?? [], data.documents ?? []);
+    } catch {
+      // Тих неуспех — нишката просто не се опреснява този път, не
+      // пречим на клиента с грешка за нещо второстепенно (viж send
+      // handler-ите по-долу за истинските грешки, които трябва да се видят).
+    }
+  }
+  await refreshThread();
+  setInterval(refreshThread, THREAD_POLL_MS);
+
+  const msgForm = document.getElementById("msg-form");
+  const msgInput = document.getElementById("msg-input");
+  msgForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = msgInput.value.trim();
+    if (!text) return;
+    const msgSendBtn = document.getElementById("msg-send-btn");
+    msgSendBtn.disabled = true;
+    try {
+      const data = await callMessages({ token, body: text });
+      renderThread(data.messages ?? [], data.documents ?? []);
+      msgInput.value = "";
+    } catch (e) {
+      resultEl.innerHTML = `<div class="msg err">${escapeHtml(e.message)}</div>`;
+    }
+    msgSendBtn.disabled = false;
+  });
 
   dz.addEventListener("click", () => fileInput.click());
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
@@ -200,10 +287,11 @@ async function init() {
       renderList();
     }
 
-    sendBtn.textContent = "Изпрати";
+    sendBtn.textContent = "Изпрати документ(и)";
     if (okCount > 0) {
       resultEl.innerHTML = `<div class="msg ok">Получихме ${okCount} ${okCount === 1 ? "документ" : "документа"}. Благодарим — счетоводителят Ви ще го обработи.</div>`;
       document.getElementById("note").value = "";
+      await refreshThread();
     }
     if (queued.some((q) => q.status === "грешка")) {
       resultEl.innerHTML += `<div class="msg err">Някои файлове не успяха да се изпратят — опитайте пак или пишете на счетоводителя си.</div>`;

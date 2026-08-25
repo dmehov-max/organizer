@@ -1913,7 +1913,7 @@ function renderProgressTable(sorted) {
     const isActive = !done && activeTimer?.kind === "task" && activeTimer.task_id === t.id && activeTimer.stage === key;
     const cls = done ? " stage-done" : isActive ? " stage-active-timer" : "";
     const content = done ? "✓" : isActive ? "⏱" : "";
-    const extra = done ? (refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : doneDateMini(t[`${field}_at`])) : "";
+    const extra = done ? `${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}${doneDateMini(t[`${field}_at`])}` : "";
     return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${content}${extra}</td>`;
   };
 

@@ -1544,9 +1544,10 @@ async function loadTasks() {
   const { data, error } = await supabase
     .from("tasks")
     .select(`
-      id, period_label, due_date, status, assigned_user_id, confirmation_status,
+      id, period_label, due_date, status, assigned_user_id, confirmation_status, completed_at,
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
+      stage_creation_done_at, stage_review_done_at, stage_submission_done_at,
       clients ( name, eik_egn, type ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id ),
@@ -1898,6 +1899,13 @@ function renderProgressTable(sorted) {
     return;
   }
 
+  // Датата под чекмарка (поискано изрично 2026-08-25) — стойността
+  // идва от отделно "_at" поле (виж 0063_stage_done_timestamps.sql),
+  // не се пресмята от нищо друго. Старите вече отметнати задачи (от
+  // преди тази миграция) нямат такава дата — клетката просто остава
+  // без нея, не е грешка.
+  const doneDateMini = (iso) => iso ? `<div class="ref-mini">${formatDateBg(iso.slice(0, 10))}</div>` : "";
+
   const stageCell = (t, field, key) => {
     const done = !!t[field];
     const refNumber = field === "stage_submission_done" ? t.submission_reference_number : null;
@@ -1905,7 +1913,8 @@ function renderProgressTable(sorted) {
     const isActive = !done && activeTimer?.kind === "task" && activeTimer.task_id === t.id && activeTimer.stage === key;
     const cls = done ? " stage-done" : isActive ? " stage-active-timer" : "";
     const content = done ? "✓" : isActive ? "⏱" : "";
-    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${content}${refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : ""}</td>`;
+    const extra = done ? (refNumber ? `<div class="ref-mini">${escapeHtml(refNumber)}</div>` : doneDateMini(t[`${field}_at`])) : "";
+    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="${field}" data-key="${key}" style="cursor:pointer;text-align:center"${title}>${content}${extra}</td>`;
   };
 
   // "Прието" (поискано изрично 2026-08-21) — умишлено НЕ е част от
@@ -1923,7 +1932,7 @@ function renderProgressTable(sorted) {
     const content = done ? "✓" : rejected ? "✗" : "";
     const title = rejected ? ` title="Потвърждението е отказано от НАП"`
       : !t.stage_submission_done ? ` title="Първо отбележи Подаване"` : "";
-    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="accepted" style="cursor:pointer;text-align:center"${title}>${content}</td>`;
+    return `<td class="stage-cell${cls}" data-id="${t.id}" data-field="accepted" style="cursor:pointer;text-align:center"${title}>${content}${done ? doneDateMini(t.completed_at) : ""}</td>`;
   };
 
   // Плащането не е поле в tasks, а отделен ред в task_payments — и
@@ -1936,7 +1945,7 @@ function renderProgressTable(sorted) {
     }
     const payment = t.task_payments?.[0];
     const paid = !!payment?.paid;
-    return `<td class="stage-cell${paid ? " stage-done" : ""}" data-id="${t.id}" data-field="payment" data-payment-id="${payment?.id ?? ""}" style="cursor:pointer;text-align:center">${paid ? "✓" : ""}</td>`;
+    return `<td class="stage-cell${paid ? " stage-done" : ""}" data-id="${t.id}" data-field="payment" data-payment-id="${payment?.id ?? ""}" style="cursor:pointer;text-align:center">${paid ? "✓" : ""}${paid ? doneDateMini(payment?.paid_at) : ""}</td>`;
   };
 
   body.innerHTML = sorted.map(({ t }, i) => {
@@ -2048,7 +2057,10 @@ function renderProgressTable(sorted) {
       if (isTimerRunningHere) await stopTimer({ markDone: false }); // само записва времето, довършването е логиката по-долу
 
       const newValue = !entry.t[field];
-      const update = { [field]: newValue };
+      // Огледално "_at" поле за датата под чекмарка (виж
+      // 0063_stage_done_timestamps.sql) — чисти се при разотметка, за
+      // да не остане закачена стара дата, ако полето се отметне пак.
+      const update = { [field]: newValue, [`${field}_at`]: newValue ? new Date().toISOString() : null };
 
       // При отбелязване на "Подаване" номерът на декларацията е по
       // избор (искането за задължителен номер е отменено 2026-08-18
@@ -2655,7 +2667,15 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   closeNewClientModal();
   showBanner("Клиентът е създаден — задачите за текущия период се генерират…", "ok");
   setTimeout(loadTasks, 1500); // изчаква generate-tasks, после презарежда таблото
-  loadClients();
+
+  // Отваря веднага цялото досие (както при редакция на съществуващ
+  // клиент) — по изрична заявка (2026-08-25): бързата форма по-горе
+  // хваща само базовите полета, останалото (адрес, имейли, настройки
+  // кои задължения важат, забележка) се пропускаше, ако човек не
+  // отвореше реда ръчно след създаването.
+  await loadClients();
+  const newRow = document.querySelector(`#clients-body tr[data-id="${newClient.id}"]`);
+  if (newRow) toggleClientSettings(newRow);
 });
 
 async function loadClients() {

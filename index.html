@@ -708,6 +708,10 @@
             <label class="switch"><input type="checkbox" id="active-cb-panel" /><span class="switch-track"></span></label>
             <label for="active-cb-panel">Активен клиент</label>
           </div>
+          <div class="check-row" style="padding:3px 0">
+            <label class="switch"><input type="checkbox" id="office-pays-cb-panel" /><span class="switch-track"></span></label>
+            <label for="office-pays-cb-panel">Офисът плаща осигуровки/ДДС вместо клиента</label>
+          </div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
             <button type="button" id="copy-upload-link-btn" class="small">Копирай линк за качване от клиента</button>
             <button type="button" id="open-client-chat-btn" class="small">Съобщения<span class="tab-badge" id="client-chat-badge" style="display:none;margin-left:5px"></span></button>
@@ -1548,7 +1552,7 @@ async function loadTasks() {
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
       stage_creation_done_at, stage_review_done_at, stage_submission_done_at,
-      clients ( name, eik_egn, type ),
+      clients ( name, eik_egn, type, office_pays_obligations ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id ),
       task_payments ( id, paid, paid_at )
@@ -1938,9 +1942,12 @@ function renderProgressTable(sorted) {
   // Плащането не е поле в tasks, а отделен ред в task_payments — и
   // съществува само за задължения с requires_payment (в тази таблица
   // е едно и също за всички редове, тя вече е филтрирана по едно
-  // задължение). Където не важи, показва празно тире, без клик.
+  // задължение). Освен това (поискано изрично 2026-08-26) — само за
+  // клиентите, за които офисът реално плаща вместо тях
+  // (clients.office_pays_obligations, виж 0064) — за другите фирми,
+  // които си плащат сами, колоната е излишен шум, показва тире.
   const paymentCell = (t) => {
-    if (!t.obligation_types?.requires_payment) {
+    if (!t.obligation_types?.requires_payment || !t.clients?.office_pays_obligations) {
       return `<td style="text-align:center;color:var(--muted)">—</td>`;
     }
     const payment = t.task_payments?.[0];
@@ -1978,9 +1985,12 @@ function renderProgressTable(sorted) {
   }
   const acceptedCount = sorted.filter(({ t }) => t.status === "completed").length;
   document.getElementById("progress-total-accepted").textContent = `${acceptedCount}/${total}`;
-  if (sorted[0].t.obligation_types?.requires_payment) {
-    const paidCount = sorted.filter(({ t }) => t.task_payments?.[0]?.paid).length;
-    document.getElementById("progress-total-payment").textContent = `${paidCount}/${total}`;
+  // Само клиентите с office_pays_obligations участват в брояча —
+  // виж бележката при paymentCell по-горе (0064).
+  const payableRows = sorted.filter(({ t }) => t.obligation_types?.requires_payment && t.clients?.office_pays_obligations);
+  if (payableRows.length > 0) {
+    const paidCount = payableRows.filter(({ t }) => t.task_payments?.[0]?.paid).length;
+    document.getElementById("progress-total-payment").textContent = `${paidCount}/${payableRows.length}`;
   } else {
     document.getElementById("progress-total-payment").textContent = "—";
   }
@@ -2468,7 +2478,7 @@ async function toggleDetail(card, task) {
     .eq("task_id", task.id).maybeSingle();
   const payInfo = document.getElementById(`payment-info-${task.id}`);
   if (!payment) {
-    payInfo.innerHTML = `<div class="hint">Няма изискване за плащане по това задължение.</div>`;
+    payInfo.innerHTML = `<div class="hint">Няма проследяване на плащане тук — или задължението не изисква такова, или клиентът плаща сам (виж "Офисът плаща..." в досието).</div>`;
   } else {
     payInfo.innerHTML = `
       <div>Срок: <b>${payment.due_date}</b></div>
@@ -2854,7 +2864,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations").eq("id", clientId).single();
 
   // Линк за клиента да качва документи сам (upload.html?t=<upload_token>,
   // без логин от негова страна) — виж миграция 0059. Копира в клипборда,
@@ -2911,6 +2921,25 @@ async function toggleClientSettings(tr) {
       showBanner("Обновено.", "ok");
     }
     activeCb.disabled = false;
+  };
+
+  // "Офисът плаща вместо клиента" (0064, поискано 2026-08-26) — гейтва
+  // колоната "Платено" в прогрес-таблицата и дали generate-tasks изобщо
+  // създава task_payments запис за бъдещи задачи на този клиент.
+  const officePaysCb = document.getElementById("office-pays-cb-panel");
+  officePaysCb.checked = !!clientRow?.office_pays_obligations;
+  officePaysCb.onchange = async () => {
+    officePaysCb.disabled = true;
+    const { error } = await supabase.from("clients")
+      .update({ office_pays_obligations: officePaysCb.checked }).eq("id", clientId);
+    if (error) {
+      showBanner("Грешка: " + error.message);
+      officePaysCb.checked = !officePaysCb.checked;
+    } else {
+      logAudit("client", clientId, "office_pays_obligations_changed", { office_pays_obligations: officePaysCb.checked });
+      showBanner("Обновено.", "ok");
+    }
+    officePaysCb.disabled = false;
   };
 
   // Данни на фирмата (Име/ЕИК/Адрес) — истинските, немаскирани

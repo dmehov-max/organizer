@@ -245,7 +245,7 @@ async function handler(req: Request): Promise<Response> {
       .from("client_obligation_settings")
       .select(`
         enabled, client_id,
-        clients ( id, active, responsible_user_id, tasks_start_date ),
+        clients ( id, active, responsible_user_id, tasks_start_date, office_pays_obligations ),
         obligation_types ( id, deadline_rule, valid_to, requires_payment )
       `)
       .eq("enabled", true);
@@ -303,7 +303,10 @@ async function handler(req: Request): Promise<Response> {
           // за самата дължима сума). Срокът за плащане по подразбиране
           // = срокът за подаване, освен ако конкретното задължение не
           // казва друго (в каталога засега винаги съвпадат — SPEC.md §6).
-          if (obligation.requires_payment && insertedTask) {
+          // office_pays_obligations (0064, поискано 2026-08-26) — само
+          // за клиентите, за които офисът реално превежда парите вместо
+          // тях; за другите не се създава запис за плащане изобщо.
+          if (obligation.requires_payment && client.office_pays_obligations && insertedTask) {
             const { error: paymentErr } = await supabase.from("task_payments").insert({
               task_id: insertedTask.id,
               due_date: dueDate,

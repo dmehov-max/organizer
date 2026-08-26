@@ -1932,6 +1932,15 @@ const STAGE_COLUMNS = [
 
 function renderProgressTable(sorted) {
   const body = document.getElementById("progress-table-body");
+
+  // Платените (маркирано "Платено") най-отгоре, после всички
+  // останали — поискано изрично 2026-08-26. Стабилно сортиране
+  // (Array.prototype.sort гарантира стабилност) — вътре във всяка от
+  // двете групи редът си остава какъвто е бил зададен от "Подреди по"
+  // по-горе (срок/клиент/задължение), само групите се разменят местата.
+  sorted = [...sorted].sort((a, b) =>
+    Number(!!b.t.task_payments?.[0]?.paid) - Number(!!a.t.task_payments?.[0]?.paid));
+
   if (sorted.length === 0) {
     body.innerHTML = `<tr><td colspan="11" class="empty">Няма задачи по този филтър.</td></tr>`;
     document.getElementById("progress-total-pct").textContent = "";

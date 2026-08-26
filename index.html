@@ -1933,17 +1933,24 @@ const STAGE_COLUMNS = [
 function renderProgressTable(sorted) {
   const body = document.getElementById("progress-table-body");
 
-  // Клиентите, за които СЛЕДИМ плащане (office_pays_obligations,
-  // 0064 — колоната "Платено" им важи, платено или не) най-отгоре,
-  // после тези без проследяване (тире в колоната) — поискано изрично
-  // 2026-08-26, поправено със същата дата (първия опит гледаше дали е
-  // вече платено, а не дали изобщо следим). Стабилно сортиране
-  // (Array.prototype.sort гарантира стабилност) — вътре във всяка от
-  // двете групи редът си остава какъвто е зададен от "Подреди по"
-  // по-горе (срок/клиент/задължение), само групите се разменят местата.
+  // Ред на редовете (поискано изрично, доуточнено на живо 2026-08-26):
+  // 1) следени за плащане (office_pays_obligations, 0064), но ОЩЕ
+  //    неплатени — най-отгоре, тях чакаме да отметнем;
+  // 2) следени и вече платени;
+  // 3) без проследяване (тире в колоната "Платено").
+  // ПЪРВО групирано по срок (период) — иначе следените клиенти от
+  // ВСИЧКИ периоди изскачаха отгоре наведнъж и разбъркваха месеците
+  // един през друг (открито на живо: юлските редове се губеха някъде
+  // по средата зад по-нови/по-стари периоди). В рамките на еднакъв
+  // срок И еднакъв ранг, редът остава какъвто е зададен от "Подреди
+  // по" (стабилно сортиране).
+  const paymentRank = ({ t }) => {
+    const tracked = !!t.obligation_types?.requires_payment && !!t.clients?.office_pays_obligations;
+    if (!tracked) return 2;
+    return t.task_payments?.[0]?.paid ? 1 : 0;
+  };
   sorted = [...sorted].sort((a, b) =>
-    Number(!!b.t.obligation_types?.requires_payment && !!b.t.clients?.office_pays_obligations)
-    - Number(!!a.t.obligation_types?.requires_payment && !!a.t.clients?.office_pays_obligations));
+    a.t.due_date !== b.t.due_date ? a.t.due_date.localeCompare(b.t.due_date) : paymentRank(a) - paymentRank(b));
 
   if (sorted.length === 0) {
     body.innerHTML = `<tr><td colspan="11" class="empty">Няма задачи по този филтър.</td></tr>`;

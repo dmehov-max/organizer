@@ -1620,9 +1620,31 @@ function renderObligationSummary(withLatest) {
   const body = document.getElementById("obligation-summary-body");
   if (withLatest.length === 0) { wrap.style.display = "none"; return; }
 
+  // Само ТЕКУЩИЯ отворен период за всяко задължение (поискано изрично
+  // 2026-08-26) — иначе Общо/Завършени растат безкрайно с всеки
+  // изминал месец и "24/24 завършени" не значи нищо за момента. Взима
+  // периода с най-скорошния due_date (не сравнение по текста на
+  // period_label — за задълженията "по събитие", болничен/чл.55 и
+  // др., period_label е свободен текст, не винаги "YYYY-MM", виж
+  // net-period в модала "Задача по събитие"). Новият период тръгва от
+  // 1-во число на месеца (generate-tasks е дневен крон) — до тогава
+  // "текущ" си остава предходният, дори последния ден преди да изтече.
+  const latestDueByObligation = new Map(); // name -> max due_date
+  for (const { t } of withLatest) {
+    const name = t.obligation_types?.name ?? "?";
+    const prevMax = latestDueByObligation.get(name);
+    if (prevMax === undefined || t.due_date > prevMax) latestDueByObligation.set(name, t.due_date);
+  }
+  const latestPeriodByObligation = new Map(); // name -> period_label на задачата с max due_date
+  for (const { t } of withLatest) {
+    const name = t.obligation_types?.name ?? "?";
+    if (t.due_date === latestDueByObligation.get(name)) latestPeriodByObligation.set(name, t.period_label);
+  }
+
   const byObligation = new Map(); // name -> { total, done, nextDue, unpaid }
   for (const { t } of withLatest) {
     const name = t.obligation_types?.name ?? "?";
+    if (t.period_label !== latestPeriodByObligation.get(name)) continue;
     const row = byObligation.get(name) ?? { total: 0, done: 0, nextDue: null, unpaid: 0 };
     row.total++;
     if (t.status === "completed") row.done++;

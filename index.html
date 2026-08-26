@@ -1933,13 +1933,17 @@ const STAGE_COLUMNS = [
 function renderProgressTable(sorted) {
   const body = document.getElementById("progress-table-body");
 
-  // Платените (маркирано "Платено") най-отгоре, после всички
-  // останали — поискано изрично 2026-08-26. Стабилно сортиране
+  // Клиентите, за които СЛЕДИМ плащане (office_pays_obligations,
+  // 0064 — колоната "Платено" им важи, платено или не) най-отгоре,
+  // после тези без проследяване (тире в колоната) — поискано изрично
+  // 2026-08-26, поправено със същата дата (първия опит гледаше дали е
+  // вече платено, а не дали изобщо следим). Стабилно сортиране
   // (Array.prototype.sort гарантира стабилност) — вътре във всяка от
-  // двете групи редът си остава какъвто е бил зададен от "Подреди по"
+  // двете групи редът си остава какъвто е зададен от "Подреди по"
   // по-горе (срок/клиент/задължение), само групите се разменят местата.
   sorted = [...sorted].sort((a, b) =>
-    Number(!!b.t.task_payments?.[0]?.paid) - Number(!!a.t.task_payments?.[0]?.paid));
+    Number(!!b.t.obligation_types?.requires_payment && !!b.t.clients?.office_pays_obligations)
+    - Number(!!a.t.obligation_types?.requires_payment && !!a.t.clients?.office_pays_obligations));
 
   if (sorted.length === 0) {
     body.innerHTML = `<tr><td colspan="11" class="empty">Няма задачи по този филтър.</td></tr>`;

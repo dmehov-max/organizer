@@ -110,6 +110,18 @@ Deno.test("periodsForRule: fixed_date — срок в БЪДЕЩЕТО тази 
   assertEquals(result.length, 1);
 });
 
+Deno.test("periodsForRule: fixed_date — year_offset -1, период е ПРЕДХОДНАТА година, срокът остава в текущата", () => {
+  // напр. ГФО в ТР чл.38: срок 30 септември текущата година, но
+  // отчита предходната (2025), не текущата (2026).
+  const result = periodsForRule({ type: "fixed_date", month: 9, day: 30, year_offset: -1 }, TODAY);
+  assertEquals(result, [{
+    periodLabel: "2025",
+    periodStart: "2025-01-01",
+    periodEnd: "2025-12-31",
+    dueDateRaw: "2026-09-30",
+  }]);
+});
+
 // ---------- daysBetween() ----------
 
 Deno.test("daysBetween: положително, когато to е по-късно", () => {

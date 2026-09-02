@@ -110,7 +110,7 @@ type Period = {
 };
 
 export function periodsForRule(
-  rule: { type: string; day?: number; month?: number },
+  rule: { type: string; day?: number; month?: number; year_offset?: number },
   today: { y: number; m: number; d: number },
 ): Period[] {
   switch (rule.type) {
@@ -128,7 +128,13 @@ export function periodsForRule(
       }];
     }
     case "fixed_date": {
-      // Период = текущата година; фиксирана календарна дата.
+      // Срокът винаги пада в текущата година (y) — датата, на която се
+      // подава. Периодът, който се ОТЧИТА, може да е различна година:
+      // year_offset (-1 по подразбиране 0 = текущата) — повечето
+      // годишни декларации (ГДД, ГФО...) отчитат ПРЕДХОДНАТА година и
+      // носят year_offset: -1 в каталога (виж 0065 миграцията), само
+      // няколко (патентна декларация, местни данъци, чл.87а...) наистина
+      // засягат текущата и оставят полето празно/0.
       const y = today.y;
       const dueDateRaw = toISODate(y, rule.month!, rule.day!);
       // Не backfill-ваме годишно задължение, чийто срок вече е далеч
@@ -138,10 +144,11 @@ export function periodsForRule(
       // наваксване", не точна законова граница — открито на живо,
       // искане повторено изрично след два подобни случая.
       if (daysBetween(dueDateRaw, toISODate(today.y, today.m, today.d)) > 60) return [];
+      const py = y + (rule.year_offset ?? 0);
       return [{
-        periodLabel: `${y}`,
-        periodStart: toISODate(y, 1, 1),
-        periodEnd: toISODate(y, 12, 31),
+        periodLabel: `${py}`,
+        periodStart: toISODate(py, 1, 1),
+        periodEnd: toISODate(py, 12, 31),
         dueDateRaw,
       }];
     }

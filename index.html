@@ -3138,12 +3138,70 @@ async function toggleClientSettings(tr) {
       const { error } = await supabase.from("client_obligation_settings").upsert({
         client_id: clientId, obligation_type_id: cb.dataset.oid,
         enabled: cb.checked, overridden_by_admin: true,
+        // updated_at изрично — при upsert-UPDATE default now() важи само
+        // за INSERT, затова без този ред датата оставаше от първото
+        // създаване на реда и показваше грешно кога е сменена настройката.
+        updated_at: new Date().toISOString(),
       }, { onConflict: "client_id,obligation_type_id" });
       if (error) showBanner("Грешка: " + error.message);
-      else logAudit("client", clientId, "obligation_setting_changed", { obligation_type_id: cb.dataset.oid, enabled: cb.checked });
+      else {
+        logAudit("client", clientId, "obligation_setting_changed", { obligation_type_id: cb.dataset.oid, enabled: cb.checked });
+        if (!cb.checked) await removeOpenTasksForDisabledObligation(clientId, cb.dataset.oid);
+      }
       cb.disabled = false;
     });
   });
+}
+
+// Изключването на задължение спира само БЪДЕЩОТО генериране
+// (generate-tasks чете само enabled=true) — вече създадените задачи
+// оставаха да висят в таблото, прогрес-таблицата и напомнянията.
+// Реален случай, докладван на живо: ЙОРДАН ДРОСЕВ ЕООД продължи да
+// стои с "Публикуване на ГФО в ТР" 2026, защото задачата е създадена
+// при завеждането на клиента, 21 секунди преди задължението да бъде
+// изключено.
+//
+// Трият се само НЕЗАПОЧНАТИТЕ задачи. Задача с какъвто и да е
+// напредък (етап, потвърждение, номер на декларация, статус ≠
+// "чакаща") е свършена работа и история — тя остава, само се казва
+// изрично, че остава, за да не изглежда че изключването не е минало.
+async function removeOpenTasksForDisabledObligation(clientId, obligationTypeId) {
+  const { data: tasks, error } = await supabase
+    .from("tasks")
+    .select("id, period_label, status, stage_creation_done, stage_review_done, stage_submission_done, confirmation_file_id, submission_reference_number")
+    .eq("client_id", clientId)
+    .eq("obligation_type_id", obligationTypeId)
+    .neq("status", "completed");
+  if (error) { showBanner("Задължението е изключено, но не успях да проверя старите задачи: " + error.message); return; }
+  if (!tasks?.length) return;
+
+  const untouched = tasks.filter((t) =>
+    t.status === "waiting" && !t.stage_creation_done && !t.stage_review_done &&
+    !t.stage_submission_done && !t.confirmation_file_id && !t.submission_reference_number);
+  const touched = tasks.length - untouched.length;
+  const touchedNote = touched > 0
+    ? ` ${touched} започната задача остава — има свършена работа по нея.`
+    : "";
+
+  if (untouched.length === 0) {
+    if (touched > 0) showBanner("Задължението е изключено." + touchedNote, "ok");
+    return;
+  }
+
+  const periods = untouched.map((t) => t.period_label).join(", ");
+  if (!confirm(`Има ${untouched.length} незапочната задача по това задължение (${periods}). Да я премахна ли от таблото?`)) return;
+
+  const ids = untouched.map((t) => t.id);
+  // .select() след delete — иначе изтриване, спряно от RLS (изтриването
+  // на задачи е само за admin, виж tasks_admin_delete), се връща като
+  // успех с 0 засегнати реда и потребителят щеше да получи "премахната"
+  // за задача, която си стои.
+  const { data: deleted, error: delErr } = await supabase.from("tasks").delete().in("id", ids).select("id");
+  if (delErr) { showBanner("Не успях да премахна задачите: " + delErr.message); return; }
+  if (!deleted?.length) { showBanner("Задължението е изключено, но задачите по него не бяха премахнати — премахването им е права на admin."); return; }
+  logAudit("client", clientId, "obligation_tasks_removed", { obligation_type_id: obligationTypeId, task_ids: deleted.map((t) => t.id), periods });
+  showBanner(`Задължението е изключено, ${deleted.length} задача е премахната.` + touchedNote, "ok");
+  loadTasks(); // таблото/прогрес-таблицата да не показват вече изтритата задача
 }
 
 // ---------------- Осчетоводяване ----------------

@@ -409,6 +409,7 @@
       </div>
       <div class="filter-toolbar">
         <select id="obligation-filter"><option value="">Всички задължения</option></select>
+        <select id="period-filter" style="display:none"></select>
         <select id="responsible-filter"><option value="">Всички отговорници</option></select>
         <select id="sort-by">
           <option value="due_date">Подреди по срок</option>
@@ -1729,6 +1730,43 @@ async function ensureSubmissionReference(task) {
   return trimmed;
 }
 
+// Период има смисъл само в рамките на ЕДНО задължение ("2026-07" за
+// ДДС и "2026" за ГФО не са съпоставими), затова менюто се показва
+// само когато е избрано конкретно задължение — както и самата
+// прогрес-таблица. По подразбиране стои ТЕКУЩИЯТ период, за да
+// съвпада с обобщеното табло горе (което вече е само за текущия
+// период). Иначе подредбата "по срок" изкарва миналия, вече приключен
+// месец най-отгоре и таблицата изглежда пълна със стара работа —
+// реален въпрос на живо (2026-09-03): юлските ДДС задачи (15/15
+// завършени) стояха над августовските.
+function populatePeriodFilter(obligationFilter, listForObligation) {
+  const sel = document.getElementById("period-filter");
+  if (!obligationFilter) { sel.style.display = "none"; sel.dataset.obligation = ""; return; }
+  sel.style.display = "";
+
+  // Подредба по СРОК низходящо, не по текста на period_label — за
+  // задачите "по събитие" (болничен, чл.55) period_label е свободен
+  // текст, не винаги "YYYY-MM"; същата бележка като в
+  // renderObligationSummary.
+  const dueByPeriod = new Map();
+  for (const { t } of listForObligation) {
+    const prev = dueByPeriod.get(t.period_label);
+    if (prev === undefined || t.due_date > prev) dueByPeriod.set(t.period_label, t.due_date);
+  }
+  const periods = [...dueByPeriod.entries()].sort((a, b) => b[1].localeCompare(a[1])).map(([p]) => p);
+
+  const prevValue = sel.value;
+  sel.innerHTML = periods.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("") +
+    `<option value="">Всички периоди</option>`;
+  // Смяна на задължението връща избора на текущия период; при същото
+  // задължение (пре-рендиране след отметка в клетка и др.) изборът на
+  // потребителя се пази, включително "Всички периоди".
+  const keepPrev = sel.dataset.obligation === obligationFilter &&
+    (prevValue === "" || periods.includes(prevValue));
+  sel.value = keepPrev ? prevValue : (periods[0] ?? "");
+  sel.dataset.obligation = obligationFilter;
+}
+
 function renderTaskCards() {
   const body = document.getElementById("tasks-body");
   const progressWrap = document.getElementById("progress-table-wrap");
@@ -1739,6 +1777,12 @@ function renderTaskCards() {
 
   let list = currentTasksWithLatest;
   if (obligationFilter) list = list.filter(({ t }) => t.obligation_types?.name === obligationFilter);
+  // Периодът се пълни от задачите СЛЕД филтъра по задължение, но ПРЕДИ
+  // този по отговорник — иначе изборът на отговорник щеше да маха
+  // периоди от менюто (напр. само неговите месеци), което обърква.
+  populatePeriodFilter(obligationFilter, list);
+  const periodFilter = obligationFilter ? document.getElementById("period-filter").value : "";
+  if (periodFilter) list = list.filter(({ t }) => t.period_label === periodFilter);
   if (responsibleFilter) list = list.filter(({ t }) => t.assigned_user_id === responsibleFilter);
 
   // Прогрес-таблицата (Създаване/Проверка/Подаване, по образец на
@@ -2186,6 +2230,7 @@ function renderProgressTable(sorted) {
 }
 
 document.getElementById("obligation-filter").addEventListener("change", renderTaskCards);
+document.getElementById("period-filter").addEventListener("change", renderTaskCards);
 document.getElementById("responsible-filter").addEventListener("change", renderTaskCards);
 document.getElementById("sort-by").addEventListener("change", renderTaskCards);
 

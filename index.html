@@ -35,7 +35,9 @@
     margin: 0; background: var(--paper); color: var(--ink);
     font-family: -apple-system, "Segoe UI", "Noto Sans", system-ui, sans-serif;
   }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 20px 80px; }
+  /* 1000px → 1360px (2026-09-15): прогрес-таблицата с 12 колони (+ Забележка,
+     0066) не се побираше и последната колона оставаше скрита вдясно. */
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 24px 20px 80px; }
   header.top {
     display: flex; align-items: center; justify-content: space-between;
     padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
@@ -110,10 +112,10 @@
   .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 640px; }
   thead th {
-    text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line);
+    text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .02em;
+    color: var(--muted); padding: 9px 8px; border-bottom: 1px solid var(--line);
   }
-  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tbody tr:last-child td { border-bottom: none; }
   tr.clickable-row { cursor: pointer; }
   tr.clickable-row:hover { background: var(--accent-soft); }
@@ -129,7 +131,7 @@
   .progress-pct.progress-done { color: var(--ok, #2e7d32); }
   tr.progress-total-row td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; background: var(--accent-soft); }
   /* --- колона "Забележка" (0066) — еднаква във всички таблици --- */
-  td.note-cell { padding-top: 6px; padding-bottom: 6px; cursor: auto; }
+  td.note-cell { width: 22%; padding-top: 6px; padding-bottom: 6px; cursor: auto; }
   textarea.note-input {
     display: block; width: 100%; min-width: 170px; min-height: 30px; margin: 0; padding: 5px 8px;
     font: inherit; font-size: .84rem; color: var(--ink); background: transparent;

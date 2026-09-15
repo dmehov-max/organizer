@@ -128,6 +128,20 @@
   .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
   .progress-pct.progress-done { color: var(--ok, #2e7d32); }
   tr.progress-total-row td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; background: var(--accent-soft); }
+  /* --- колона "Забележка" (0066) — еднаква във всички таблици --- */
+  td.note-cell { padding-top: 6px; padding-bottom: 6px; cursor: auto; }
+  textarea.note-input {
+    display: block; width: 100%; min-width: 170px; min-height: 30px; margin: 0; padding: 5px 8px;
+    font: inherit; font-size: .84rem; color: var(--ink); background: transparent;
+    border: 1px solid transparent; border-radius: 6px; resize: vertical; field-sizing: content; max-height: 140px;
+    transition: border-color .15s, background .15s;
+  }
+  tr:hover textarea.note-input, textarea.note-input:not(:placeholder-shown) { border-color: var(--line); }
+  textarea.note-input:focus { outline: 2px solid var(--accent); outline-offset: 0; background: var(--card); }
+  textarea.note-input.note-saved { border-color: var(--ok, #2e7d32); background: #e8f5e9; }
+  textarea.note-input.note-error { border-color: var(--red); background: var(--red-soft); }
+  textarea.note-input::placeholder { color: transparent; }
+  tr:hover textarea.note-input::placeholder, textarea.note-input:focus::placeholder { color: var(--muted); }
 
   .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
   .pill-waiting { background: var(--amber-soft); color: var(--amber); }
@@ -427,7 +441,7 @@
         <table>
           <thead><tr>
             <th>№</th><th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
-            <th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Прието</th><th>Платено</th>
+            <th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Прието</th><th>Платено</th><th>Забележка</th>
           </tr></thead>
           <tbody id="progress-table-body"></tbody>
           <tfoot><tr class="progress-total-row">
@@ -438,6 +452,7 @@
             <td id="progress-total-submission"></td>
             <td id="progress-total-accepted"></td>
             <td id="progress-total-payment"></td>
+            <td></td>
           </tr></tfoot>
         </table>
       </div>
@@ -453,8 +468,8 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>№</th><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th></tr></thead>
-          <tbody id="clients-body"><tr><td colspan="6" class="loading">Зареждане…</td></tr></tbody>
+          <thead><tr><th>№</th><th>Име</th><th>ЕИК/ЕГН</th><th>Тип</th><th>Отговорник</th><th>Активен</th><th>Забележка</th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -466,9 +481,9 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>№</th><th>Фирма</th><th>Тип</th><th>Заглавие</th><th>Срок</th><th>Статус</th><th>Документ</th><th></th>
+            <th>№</th><th>Фирма</th><th>Тип</th><th>Заглавие</th><th>Срок</th><th>Статус</th><th>Документ</th><th>Забележка</th><th></th>
           </tr></thead>
-          <tbody id="inspections-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
+          <tbody id="inspections-body"><tr><td colspan="9" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -483,9 +498,9 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>№</th><th>Фирма</th><th>Файл</th><th>Бележка</th><th>Получен</th><th>Статус</th><th></th>
+            <th>№</th><th>Фирма</th><th>Файл</th><th>Бележка от клиента</th><th>Получен</th><th>Статус</th><th>Забележка</th><th></th>
           </tr></thead>
-          <tbody id="incoming-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
+          <tbody id="incoming-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -523,9 +538,9 @@
         <table>
           <thead><tr>
             <th>№</th><th>Фирма</th><th>ЕИК/ЕГН</th>
-            <th>Приходи</th><th>Разходи</th><th>Заплати</th><th>Банка</th>
+            <th>Приходи</th><th>Разходи</th><th>Заплати</th><th>Банка</th><th>Забележка</th>
           </tr></thead>
-          <tbody id="bookkeeping-body"><tr><td colspan="7" class="loading">Зареждане…</td></tr></tbody>
+          <tbody id="bookkeeping-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -941,6 +956,46 @@ function checkRowHtml(id, label, checked, extraAttrs = "") {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------------- Колона "Забележка" (0066) ----------------
+// Една и съща клетка във всички таблици с фирми (поискано изрично
+// 2026-09-15). Запис при напускане на полето (като досието — без бутон
+// "Запази"); Enter също записва, Shift+Enter е нов ред. Зелена рамка
+// = записано, червена = грешка (и банер с причината).
+function noteCellHtml(value, dataAttrs = "") {
+  return `<td class="note-cell"><textarea class="note-input" rows="1" placeholder="Забележка…" ${dataAttrs}>${escapeHtml(value ?? "")}</textarea></td>`;
+}
+
+// save(textarea, valueOrNull) -> Promise<{ error, data }> от supabase-js.
+// Празен резултат без грешка = RLS тихо е отказал ъпдейта (PostgREST
+// не връща грешка за 0 засегнати реда) — затова save трябва да
+// завършва със .select(), за да можем да го различим от успех.
+function wireNoteInputs(root, save) {
+  root.querySelectorAll("textarea.note-input").forEach((ta) => {
+    let saved = ta.value.trim();
+    // Клик в клетката (и около полето) не трябва да отваря досието/грида на реда.
+    ta.closest("td").addEventListener("click", (e) => e.stopPropagation());
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+      if (e.key === "Escape") { e.stopPropagation(); ta.value = saved; ta.blur(); }
+    });
+    ta.addEventListener("blur", async () => {
+      const value = ta.value.trim();
+      if (value === saved) return;
+      ta.classList.remove("note-saved", "note-error");
+      const { data, error } = await save(ta, value || null);
+      const failure = error?.message ?? ((Array.isArray(data) ? data.length : data) ? null : "нямаш права за тази фирма");
+      if (failure) {
+        ta.classList.add("note-error");
+        showBanner("Забележката не е записана: " + failure);
+        return;
+      }
+      saved = value;
+      ta.classList.add("note-saved");
+      setTimeout(() => ta.classList.remove("note-saved"), 1500);
+    });
+  });
 }
 
 // Одит лог (SPEC.md §11) — всеки пише само своите действия, RLS
@@ -1552,7 +1607,7 @@ async function loadTasks() {
       id, period_label, due_date, status, assigned_user_id, confirmation_status, completed_at,
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
-      stage_creation_done_at, stage_review_done_at, stage_submission_done_at,
+      stage_creation_done_at, stage_review_done_at, stage_submission_done_at, note,
       clients ( name, eik_egn, type, office_pays_obligations ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id ),
@@ -1997,7 +2052,7 @@ function renderProgressTable(sorted) {
     a.t.due_date !== b.t.due_date ? a.t.due_date.localeCompare(b.t.due_date) : paymentRank(a) - paymentRank(b));
 
   if (sorted.length === 0) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">Няма задачи по този филтър.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty">Няма задачи по този филтър.</td></tr>`;
     document.getElementById("progress-total-pct").textContent = "";
     document.getElementById("progress-total-creation").textContent = "";
     document.getElementById("progress-total-review").textContent = "";
@@ -2075,9 +2130,24 @@ function renderProgressTable(sorted) {
         ${stageCell(t, "stage_submission_done", "submission")}
         ${acceptedCell(t)}
         ${paymentCell(t)}
+        ${noteCellHtml(t.note, `data-id="${t.id}"`)}
       </tr>
     `;
   }).join("");
+
+  // Забележката е към задачата (фирма × задължение × период), не към
+  // фирмата изобщо — виж 0066. Пазим я и в локалния кеш, защото всеки
+  // клик по етап презарисува таблицата от него (renderTaskCards) — и то
+  // ПРЕДИ заявката да е приключила (blur → click по отметка), затова
+  // кешът се сменя веднага и се връща само при неуспех.
+  wireNoteInputs(body, async (ta, note) => {
+    const entry = currentTasksWithLatest.find(({ t }) => t.id === ta.dataset.id);
+    const previous = entry?.t.note ?? null;
+    if (entry) entry.t.note = note;
+    const res = await supabase.from("tasks").update({ note }).eq("id", ta.dataset.id).select("id");
+    if ((res.error || !res.data?.length) && entry) entry.t.note = previous;
+    return res;
+  });
 
   const total = sorted.length;
   const sumPct = sorted.reduce((acc, { t }) => acc + STAGE_COLUMNS.filter(([field]) => t[field]).length, 0);
@@ -2795,23 +2865,23 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
 
 async function loadClients() {
   const body = document.getElementById("clients-body");
-  body.innerHTML = `<tr><td colspan="6" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
   populateResponsibleSelect();
   populateResponsibleFilter("clients-responsible-filter");
 
   const { data: rawData, error } = await supabase
     .from("clients")
-    .select("id, name, eik_egn, type, active, responsible_user_id")
+    .select("id, name, eik_egn, type, active, responsible_user_id, notes")
     .order("name");
 
-  if (error) { body.innerHTML = `<tr><td colspan="6" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!rawData || rawData.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти още.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!rawData || rawData.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти още.</td></tr>`; return; }
 
   const responsibleFilterValue = document.getElementById("clients-responsible-filter").value;
   const data = responsibleFilterValue
     ? rawData.filter((c) => c.responsible_user_id === responsibleFilterValue)
     : rawData;
-  if (data.length === 0) { body.innerHTML = `<tr><td colspan="6" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
+  if (data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
 
   // .order("name") в заявката подрежда по байтове (Postgres default
   // collation), не винаги вярно азбучно за кирилица — пресортираме
@@ -2835,9 +2905,15 @@ async function loadClients() {
       <td>${c.type === "legal_entity" ? "ЮЛ" : "ФЛ"}</td>
       <td>${usersById[c.responsible_user_id] ?? "—"}</td>
       <td>${c.active ? "да" : "не"}</td>
+      ${noteCellHtml(c.notes, `data-id="${c.id}"`)}
     `;
     body.appendChild(tr);
   });
+
+  // Тук забележката е общата за фирмата — същото поле clients.notes
+  // като "Забележка" в досието (0050), двете са едно и също.
+  wireNoteInputs(body, (ta, notes) =>
+    supabase.from("clients").update({ notes }).eq("id", ta.dataset.id).select("id"));
 
   body.querySelectorAll(".reveal-egn").forEach((a) => {
     a.addEventListener("click", (e) => {
@@ -3086,6 +3162,8 @@ async function toggleClientSettings(tr) {
     tr.children[1].textContent = name; // Име, не "№" (виж бележката в toggleClientSettings)
     const egnCell = tr.children[2].querySelector(".egn-cell");
     if (egnCell) egnCell.textContent = maskEgn(eik, clientRow?.type);
+    const noteInput = tr.querySelector("textarea.note-input");
+    if (noteInput) noteInput.value = notes;
   };
   // .onblur (не addEventListener) — тази функция се вика при всяко
   // отваряне на модала; addEventListener трупаше по един listener на
@@ -3284,13 +3362,13 @@ async function loadBookkeepingSummary() {
   const year = Number(document.getElementById("bk-year-filter").value);
   const responsibleFilterValue = document.getElementById("bk-responsible-filter").value;
   const body = document.getElementById("bookkeeping-body");
-  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
 
   // RLS (0048) вече ограничава до собствените клиенти за счетоводител,
   // всички за admin — същия модел като clients в момента.
   const { data: clients, error: cErr } = await supabase
     .from("clients").select("id, name, eik_egn, type, responsible_user_id").eq("active", true);
-  if (cErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${cErr.message}</td></tr>`; return; }
+  if (cErr) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${cErr.message}</td></tr>`; return; }
   const filtered = responsibleFilterValue
     ? (clients ?? []).filter((c) => c.responsible_user_id === responsibleFilterValue)
     : (clients ?? []);
@@ -3298,9 +3376,14 @@ async function loadBookkeepingSummary() {
 
   const { data: progress, error: pErr } = await supabase
     .from("bookkeeping_progress").select("client_id, category, month").eq("year", year);
-  if (pErr) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${pErr.message}</td></tr>`; return; }
+  if (pErr) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${pErr.message}</td></tr>`; return; }
 
-  if (sorted.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
+  const { data: notes, error: nErr } = await supabase
+    .from("bookkeeping_notes").select("client_id, note").eq("year", year);
+  if (nErr) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${nErr.message}</td></tr>`; return; }
+  const noteByClient = Object.fromEntries((notes ?? []).map((n) => [n.client_id, n.note]));
+
+  if (sorted.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма клиенти по този филтър.</td></tr>`; return; }
 
   body.innerHTML = sorted.map((c, i) => {
     const cells = BK_CATEGORIES.map(([code]) => {
@@ -3313,12 +3396,21 @@ async function loadBookkeepingSummary() {
       <td>${escapeHtml(c.name)}</td>
       <td>${maskEgn(c.eik_egn, c.type)}</td>
       ${cells}
+      ${noteCellHtml(noteByClient[c.id], `data-id="${c.id}"`)}
     </tr>`;
   }).join("");
 
   body.querySelectorAll("tr.clickable-row").forEach((tr) => {
     tr.addEventListener("click", () => openBookkeepingDetail(tr.dataset.id, tr.dataset.name));
   });
+
+  // Забележка по фирма × година (bookkeeping_notes, 0066) — празна
+  // забележка = изтрит ред, по същия принцип като bookkeeping_progress.
+  wireNoteInputs(body, (ta, note) => note
+    ? supabase.from("bookkeeping_notes")
+        .upsert({ client_id: ta.dataset.id, year, note, updated_by: myProfile.id, updated_at: new Date().toISOString() })
+        .select("client_id")
+    : supabase.from("bookkeeping_notes").delete().eq("client_id", ta.dataset.id).eq("year", year).select("client_id"));
 }
 
 document.getElementById("bk-year-filter").addEventListener("change", loadBookkeepingSummary);
@@ -3657,13 +3749,13 @@ const INSPECTION_KIND_LABELS = { inspection: "Проверка", audit: "Рев�
 
 async function loadInspections() {
   const body = document.getElementById("inspections-body");
-  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="9" class="loading">Зареждане…</td></tr>`;
 
   const { data, error } = await supabase.from("inspections")
-    .select("id, kind, title, due_date, status, storage_path, clients(name)")
+    .select("id, kind, title, due_date, status, storage_path, note, clients(name)")
     .order("due_date", { ascending: true, nullsFirst: false });
-  if (error) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма проверки/ревизии още.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="9" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="9" class="empty">Няма проверки/ревизии още.</td></tr>`; return; }
 
   body.innerHTML = data.map((insp, i) => `
     <tr>
@@ -3674,6 +3766,7 @@ async function loadInspections() {
       <td>${insp.due_date ? formatDateBg(insp.due_date) : "—"}</td>
       <td><span class="pill pill-${insp.status === "closed" ? "completed" : "waiting"}">${insp.status === "closed" ? "Приключена" : "Открита"}</span></td>
       <td>${insp.storage_path ? `<a class="linklike insp-view-btn" data-path="${escapeHtml(insp.storage_path)}">Виж PDF</a>` : `<span style="color:var(--muted)">—</span>`}</td>
+      ${noteCellHtml(insp.note, `data-id="${insp.id}"`)}
       <td><button class="small insp-toggle-btn" data-id="${insp.id}" data-status="${insp.status}">${insp.status === "closed" ? "Отвори пак" : "Приключи"}</button></td>
     </tr>
   `).join("");
@@ -3697,6 +3790,9 @@ async function loadInspections() {
       loadInspections();
     });
   });
+
+  wireNoteInputs(body, (ta, note) =>
+    supabase.from("inspections").update({ note }).eq("id", ta.dataset.id).select("id"));
 }
 
 const newInspectionBackdrop = document.getElementById("new-inspection-backdrop");
@@ -3768,16 +3864,16 @@ async function refreshIncomingBadge() {
 
 async function loadIncomingDocuments() {
   const body = document.getElementById("incoming-body");
-  body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
 
   const statusFilter = document.getElementById("incoming-status-filter").value;
   let query = supabase.from("incoming_documents")
-    .select("id, original_filename, storage_path, note, status, received_at, source, source_url, clients(name)")
+    .select("id, original_filename, storage_path, note, staff_note, status, received_at, source, source_url, clients(name)")
     .order("received_at", { ascending: false });
   if (statusFilter) query = query.eq("status", statusFilter);
   const { data, error } = await query;
-  if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="7" class="empty">Няма документи по този филтър.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма документи по този филтър.</td></tr>`; return; }
 
   // Два източника (0060): 'client_upload' — файлът е в нашия Storage,
   // кликът показва signed URL; 'email_detected' — само лог от ръчна
@@ -3793,6 +3889,7 @@ async function loadIncomingDocuments() {
       <td>${d.note ? escapeHtml(d.note) : "<span style=\"color:var(--muted)\">—</span>"}</td>
       <td>${formatDateBg(d.received_at)}</td>
       <td><span class="pill pill-${d.status === "done" ? "completed" : "waiting"}">${d.status === "done" ? "Обработен" : "Нов"}</span></td>
+      ${noteCellHtml(d.staff_note, `data-id="${d.id}"`)}
       <td><button class="small incoming-toggle-btn" data-id="${d.id}" data-status="${d.status}">${d.status === "done" ? "Отвори пак" : "Обработен"}</button></td>
     </tr>
   `).join("");
@@ -3821,6 +3918,10 @@ async function loadIncomingDocuments() {
       refreshIncomingBadge();
     });
   });
+
+  // staff_note, не note — note е написаното от клиента при качване (0066).
+  wireNoteInputs(body, (ta, staff_note) =>
+    supabase.from("incoming_documents").update({ staff_note }).eq("id", ta.dataset.id).select("id"));
 }
 
 document.getElementById("incoming-status-filter").addEventListener("change", loadIncomingDocuments);

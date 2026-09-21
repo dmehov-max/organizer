@@ -142,8 +142,11 @@ async function handler(_req: Request): Promise<Response> {
     const emailById = new Map<string, string>();
     for (const u of usersList.users) if (u.email) emailById.set(u.id, u.email);
 
-    const { data: profiles, error: profilesErr } = await supabase.from("profiles").select("id, role, active");
+    const { data: profiles, error: profilesErr } = await supabase.from("profiles").select("id, role, active, full_name");
     if (profilesErr) throw profilesErr;
+    const nameById = new Map<string, string>(
+      (profiles ?? []).map((p: any) => [p.id as string, (p.full_name as string) ?? "?"]),
+    );
     const adminEmails = (profiles ?? [])
       .filter((p: any) => p.role === "admin" && p.active)
       .map((p: any) => emailById.get(p.id))
@@ -282,6 +285,47 @@ async function handler(_req: Request): Promise<Response> {
           text: `Днес (${todayISO}) изтичат:\n\n${b.today.map((x) => x.line).join("\n")}`,
         });
       }
+    }
+
+    // ------------------------------------------------------------
+    // Непрочетени вътрешни съобщения (0069) — един ред на ден
+    // на човек, не отделно писмо на съобщение. Броят се САМО
+    // съобщения отпреди днес: имейл за писмо отпреди 10 минути
+    // е шум — човекът е на работа и ще види брояча в приложението.
+    // Не се праща съдържанието на съобщението — вътрешната
+    // кореспонденция може да съдържа имена на фирми и данни,
+    // които няма причина да излизат през Resend извън системата.
+    // ------------------------------------------------------------
+    const { data: unreadMsgs, error: unreadErr } = await supabase
+      .from("staff_messages")
+      .select("id, recipient_id, author_id, created_at")
+      .is("read_at", null);
+    if (unreadErr) sendErrors.push(`unread-messages: ${unreadErr.message}`);
+
+    const unreadByRecipient = new Map<string, Set<string>>();
+    for (const m of (unreadMsgs ?? []) as any[]) {
+      // Сравняваме по СОФИЙСКА дата, не по UTC — съобщение,
+      // пуснато вчера в 23:30 местно време, е "отпреди днес".
+      const msgDate = new Intl.DateTimeFormat("en-CA", { timeZone: SOFIA_TZ }).format(new Date(m.created_at));
+      if (msgDate >= todayISO) continue;
+      if (!unreadByRecipient.has(m.recipient_id)) unreadByRecipient.set(m.recipient_id, new Set());
+      unreadByRecipient.get(m.recipient_id)!.add(m.author_id);
+    }
+
+    for (const [userId, authorIds] of unreadByRecipient) {
+      const email = emailById.get(userId);
+      if (!email) continue;
+      const senders = [...authorIds].map((id) => nameById.get(id) ?? "?").join(", ");
+      const n = (unreadMsgs ?? []).filter((m: any) =>
+        m.recipient_id === userId &&
+        new Intl.DateTimeFormat("en-CA", { timeZone: SOFIA_TZ }).format(new Date(m.created_at)) < todayISO
+      ).length;
+      await notifyOnce({
+        sentTo: userId, type: "unread_staff_messages", to: [email],
+        subject: `Имаш ${n} непрочетени съобщения в Органайзер`,
+        text: `Имаш ${n} непрочетени вътрешни съобщения от: ${senders}.\n\n` +
+          `Отвори таб "Съобщения" в Органайзер, за да ги прочетеш.`,
+      });
     }
 
     // ------------------------------------------------------------

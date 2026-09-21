@@ -245,6 +245,26 @@
   .composer textarea { margin: 0; min-height: 42px; max-height: 120px; flex: 1 1 auto; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); resize: vertical; }
   .composer button { flex: 0 0 auto; width: auto; padding: 9px 16px; }
 
+  /* --- вътрешни съобщения между служители (0069). Списъкът в таба е
+     редове (виждаш и получени, и изпратени, с контекста), а нишката в
+     разгъната задача преизползва .bubble от чата с клиента — само че
+     тук страните са "mine"/"theirs", не "staff"/"client". --- */
+  #staff-inbox { display: flex; flex-direction: column; gap: 10px; }
+  #staff-inbox:empty::after { content: "Няма съобщения."; color: var(--muted); font-size: .85rem; }
+  .msg { background: var(--card); border: 1px solid var(--line); border-left: 3px solid transparent; border-radius: 12px; padding: 11px 14px; }
+  .msg.unread { border-left-color: var(--accent); background: var(--accent-soft); }
+  .msg .msg-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .msg .who { font-weight: 700; font-size: .88rem; color: var(--ink); }
+  .msg .when { font-size: .74rem; color: var(--muted); white-space: nowrap; }
+  .msg .ctx { font-size: .74rem; color: var(--accent-ink); margin-top: 2px; }
+  .msg .text { font-size: .88rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin-top: 6px; }
+  .msg .msg-actions { margin-top: 8px; }
+  .task-thread { display: flex; flex-direction: column; gap: 7px; max-height: 210px; overflow-y: auto; margin-bottom: 10px; }
+  .task-thread:empty::after { content: "Няма съобщения по тази задача."; color: var(--muted); font-size: .82rem; }
+  .bubble.mine { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  .bubble.theirs { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .bubble .who { display: block; font-size: .7rem; font-weight: 700; opacity: .85; margin-bottom: 2px; }
+
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
   .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
@@ -398,6 +418,10 @@
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8.5M8 10.5L5 7.5M8 10.5l3-3"/><path d="M2.5 11v1.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V11"/></svg>
         Входящи документи<span class="tab-badge" id="incoming-badge" style="display:none"></span>
       </button>
+      <button class="tab" data-tab="staff-messages" id="staff-messages-tab-btn">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H6.5L4 13.5V11.5H3a1 1 0 0 1-1-1z"/><path d="M5 6.5h6M5 8.8h4"/></svg>
+        Съобщения<span class="tab-badge" id="staff-messages-badge" style="display:none"></span>
+      </button>
       <span class="tab-divider"></span>
       <button class="tab" data-tab="clients" id="clients-tab-btn" style="display:none">
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1"/><path d="M5.5 4.5h1M9.5 4.5h1M5.5 7.5h1M9.5 7.5h1M5.5 10.5h1M9.5 10.5h1"/><path d="M6.5 14.5v-3h3v3"/></svg>
@@ -505,6 +529,30 @@
           <tbody id="incoming-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
+    </section>
+
+    <section id="staff-messages-panel" style="display:none">
+      <div class="table-wrap" style="padding:14px 16px; margin-bottom:16px">
+        <h4 style="margin:0 0 10px; font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted)">Ново съобщение</h4>
+        <div class="filter-toolbar" style="margin-bottom:10px">
+          <select id="sm-recipient"></select>
+          <span id="sm-context-label" class="hint" style="align-self:center"></span>
+          <button type="button" id="sm-clear-context" class="small" style="display:none">Махни контекста</button>
+        </div>
+        <form id="sm-form" class="composer">
+          <textarea id="sm-input" placeholder="Напишете съобщение до колега…" rows="1"></textarea>
+          <button class="primary" type="submit">Изпрати</button>
+        </form>
+      </div>
+      <div class="filter-toolbar">
+        <select id="sm-filter">
+          <option value="inbox">Получени</option>
+          <option value="unread">Само непрочетени</option>
+          <option value="sent">Изпратени</option>
+          <option value="all">Всички</option>
+        </select>
+      </div>
+      <div id="staff-inbox"><div class="loading">Зареждане…</div></div>
     </section>
 
     <div class="modal-backdrop" id="new-inspection-backdrop">
@@ -873,6 +921,7 @@ const NEXT_STATUS = { waiting: "in_progress", in_progress: "submitted" };
 const NEXT_LABEL = { waiting: "Започни", in_progress: "Маркирай подадена" };
 
 let myProfile = null;
+let allProfiles = [];
 let usersById = {}; // id -> full_name (само за admin изгледа)
 let openTaskId = null; // кой ред е разгънат в момента
 
@@ -1256,12 +1305,18 @@ async function enterApp() {
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
   document.getElementById("statistics-tab-btn").style.display = profile.role === "admin" ? "" : "none";
 
-  const { data: profs } = await supabase.from("profiles").select("id, full_name");
+  // `active` се чете и тук (не само в admin таба) — падащото меню за
+  // получател на вътрешно съобщение (0069) не бива да предлага спрян
+  // потребител, който никога няма да го отвори.
+  const { data: profs } = await supabase.from("profiles").select("id, full_name, active");
   usersById = Object.fromEntries((profs ?? []).map((p) => [p.id, p.full_name]));
+  allProfiles = profs ?? [];
+  fillRecipientSelect();
 
   loadTasks();
   refreshIncomingBadge();
   refreshMessagesBadge();
+  refreshStaffMessagesBadge();
   refreshMfaSetupStatus({ autoPrompt: true });
   resumeOrCloseStaleTimer();
 }
@@ -1376,12 +1431,14 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
     document.getElementById("inspections-panel").style.display = tab === "inspections" ? "" : "none";
     document.getElementById("incoming-panel").style.display = tab === "incoming" ? "" : "none";
+    document.getElementById("staff-messages-panel").style.display = tab === "staff-messages" ? "" : "none";
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("statistics-panel").style.display = tab === "statistics" ? "" : "none";
     document.getElementById("users-panel").style.display = tab === "users" ? "" : "none";
     if (tab === "clients") loadClients();
     if (tab === "inspections") loadInspections();
     if (tab === "incoming") loadIncomingDocuments();
+    if (tab === "staff-messages") loadStaffMessages();
     if (tab === "bookkeeping") loadBookkeepingSummary();
     if (tab === "statistics") { loadBkTimeReport(); loadTaskTimeReport(); }
     if (tab === "users") loadUsers();
@@ -2545,8 +2602,22 @@ async function toggleDetail(card, task) {
       <h4>Плащане</h4>
       <div id="payment-info-${task.id}">Зареждане…</div>
     </div>
+    <div class="detail-block" style="grid-column:1/-1">
+      <h4>Съобщения по задачата</h4>
+      <div class="task-thread" id="task-thread-${task.id}"></div>
+      <div class="filter-toolbar" style="margin-bottom:8px">
+        <select id="task-msg-recipient-${task.id}"></select>
+      </div>
+      <form class="composer" id="task-msg-form-${task.id}">
+        <textarea id="task-msg-input-${task.id}" rows="1" placeholder="Съобщение до колега по тази задача…"></textarea>
+        <button class="primary" type="submit">Изпрати</button>
+      </form>
+    </div>
   </div>`;
   card.after(detailDiv);
+  // Нишката (0069) се пълни без await — прикачените файлове и
+  // плащането по-долу са по-важни и не бива да чакат нея.
+  loadTaskThread(task);
 
   // Прикачени файлове
   const { data: attachments } = await supabase
@@ -4006,6 +4077,203 @@ document.getElementById("client-chat-form").addEventListener("submit", async (e)
   if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
   input.value = "";
   await loadClientChat(currentChatClientId);
+});
+
+// ---------------- Вътрешни съобщения между служители (0069) ----------------
+// Един механизъм, два изгледа: ред със задължителен адресат и
+// НЕЗАДЪЛЖИТЕЛЕН контекст (task_id). С контекст се показва и като
+// нишка в разгънатата задача; без контекст живее само в този таб.
+// Контекстът се пази и като текст (context_label), затова редът се
+// чете смислено дори ако задачата бъде изтрита или адресатът няма
+// достъп до фирмата (счетоводител вижда само своите клиенти — 0047).
+
+// Контекстът, с който ще тръгне следващото съобщение от таба —
+// попълва се само от бутона "Отговори", иначе е празен.
+let smPendingContext = null;
+
+function fillRecipientSelect() {
+  const sel = document.getElementById("sm-recipient");
+  if (!sel) return;
+  sel.innerHTML = recipientOptionsHtml();
+}
+
+// Общ за таба и за нишката в задачата — спрените потребители не се
+// предлагат, защото никога няма да отворят съобщението.
+function recipientOptionsHtml() {
+  const options = allProfiles
+    .filter((p) => p.active && p.id !== myProfile?.id)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, "bg"));
+  return options.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name)}</option>`).join("")
+    || `<option value="">няма други активни потребители</option>`;
+}
+
+function setSmContext(ctx) {
+  smPendingContext = ctx;
+  const label = document.getElementById("sm-context-label");
+  const clearBtn = document.getElementById("sm-clear-context");
+  label.textContent = ctx?.context_label ? `относно: ${ctx.context_label}` : "";
+  clearBtn.style.display = ctx ? "" : "none";
+}
+
+document.getElementById("sm-clear-context").addEventListener("click", () => setSmContext(null));
+
+async function refreshStaffMessagesBadge() {
+  const { count } = await supabase
+    .from("staff_messages").select("id", { count: "exact", head: true })
+    .eq("recipient_id", myProfile.id).is("read_at", null);
+  const badge = document.getElementById("staff-messages-badge");
+  if (count) { badge.textContent = count; badge.style.display = ""; }
+  else { badge.style.display = "none"; }
+}
+
+async function loadStaffMessages() {
+  const wrap = document.getElementById("staff-inbox");
+  const filter = document.getElementById("sm-filter").value;
+  wrap.innerHTML = `<div class="loading">Зареждане…</div>`;
+
+  let q = supabase.from("staff_messages")
+    .select("id, author_id, recipient_id, task_id, client_id, context_label, body, created_at, read_at")
+    .order("created_at", { ascending: false }).limit(200);
+  if (filter === "inbox") q = q.eq("recipient_id", myProfile.id);
+  else if (filter === "unread") q = q.eq("recipient_id", myProfile.id).is("read_at", null);
+  else if (filter === "sent") q = q.eq("author_id", myProfile.id);
+  // "all" не филтрира нищо — RLS сама решава какво се вижда: моите
+  // плюс тези по задачи, възложени на мен (виж staff_messages_select).
+
+  const { data, error } = await q;
+  if (error) { wrap.innerHTML = `<div class="empty">Грешка: ${escapeHtml(error.message)}</div>`; return; }
+
+  wrap.innerHTML = (data ?? []).map((m) => {
+    const incoming = m.recipient_id === myProfile.id;
+    const who = incoming
+      ? `от ${escapeHtml(usersById[m.author_id] ?? "?")}`
+      : `до ${escapeHtml(usersById[m.recipient_id] ?? "?")}`;
+    const unread = incoming && !m.read_at;
+    return `
+      <div class="msg${unread ? " unread" : ""}">
+        <div class="msg-head">
+          <span class="who">${who}</span>
+          <span class="when">${formatChatTime(m.created_at)}</span>
+        </div>
+        ${m.context_label ? `<div class="ctx">относно: ${escapeHtml(m.context_label)}</div>` : ""}
+        <div class="text">${escapeHtml(m.body)}</div>
+        ${incoming ? `<div class="msg-actions"><button class="small sm-reply-btn"
+            data-author="${m.author_id}"
+            data-task="${m.task_id ?? ""}"
+            data-client="${m.client_id ?? ""}"
+            data-label="${escapeHtml(m.context_label ?? "")}">Отговори</button></div>` : ""}
+      </div>`;
+  }).join("");
+
+  wrap.querySelectorAll(".sm-reply-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById("sm-recipient").value = btn.dataset.author;
+      const hasCtx = btn.dataset.label || btn.dataset.task || btn.dataset.client;
+      setSmContext(hasCtx
+        ? { task_id: btn.dataset.task || null, client_id: btn.dataset.client || null, context_label: btn.dataset.label || null }
+        : null);
+      const input = document.getElementById("sm-input");
+      input.focus();
+      input.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
+  // Прочетено = показано ми е на екрана (същата логика като чата с
+  // клиента — броячът трябва да значи "още никой не е видял това").
+  const unreadIds = (data ?? []).filter((m) => m.recipient_id === myProfile.id && !m.read_at).map((m) => m.id);
+  if (unreadIds.length) {
+    await supabase.from("staff_messages").update({ read_at: new Date().toISOString() }).in("id", unreadIds);
+    refreshStaffMessagesBadge();
+  }
+}
+
+document.getElementById("sm-filter").addEventListener("change", loadStaffMessages);
+
+document.getElementById("sm-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("sm-input");
+  const body = input.value.trim();
+  const recipient = document.getElementById("sm-recipient").value;
+  if (!body) return;
+  if (!recipient) { showBanner("Няма на кого да го изпратя — няма друг активен потребител."); return; }
+  const { error } = await supabase.from("staff_messages").insert({
+    author_id: myProfile.id, recipient_id: recipient, body,
+    task_id: smPendingContext?.task_id ?? null,
+    client_id: smPendingContext?.client_id ?? null,
+    context_label: smPendingContext?.context_label ?? null,
+  });
+  if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
+  input.value = "";
+  setSmContext(null);
+  showBanner("Съобщението е изпратено.", "ok");
+  loadStaffMessages();
+});
+
+// --- нишката в разгъната задача ---
+
+function taskContextLabel(task) {
+  const obl = task.obligation_types?.name ?? "задача";
+  const client = task.clients?.name ?? "?";
+  return `${obl} — ${client} (${task.period_label})`;
+}
+
+async function loadTaskThread(task) {
+  const threadEl = document.getElementById(`task-thread-${task.id}`);
+  if (!threadEl) return;
+
+  const sel = document.getElementById(`task-msg-recipient-${task.id}`);
+  sel.innerHTML = recipientOptionsHtml();
+  // По подразбиране пишеш на отговорника на задачата; ако това съм аз
+  // (или няма такъв), менюто остава на първия по азбучен ред.
+  if (task.assigned_user_id && task.assigned_user_id !== myProfile?.id) {
+    const opt = [...sel.options].find((o) => o.value === task.assigned_user_id);
+    if (opt) sel.value = task.assigned_user_id;
+  }
+
+  const { data, error } = await supabase.from("staff_messages")
+    .select("id, author_id, recipient_id, body, created_at, read_at")
+    .eq("task_id", task.id).order("created_at", { ascending: true });
+  if (error) { threadEl.innerHTML = `<div class="empty">Грешка: ${escapeHtml(error.message)}</div>`; return; }
+
+  threadEl.innerHTML = (data ?? []).map((m) => {
+    const mine = m.author_id === myProfile.id;
+    return `<div class="bubble ${mine ? "mine" : "theirs"}">
+      <span class="who">${escapeHtml(mine ? "аз" : (usersById[m.author_id] ?? "?"))} → ${escapeHtml(usersById[m.recipient_id] ?? "?")}</span>
+      ${escapeHtml(m.body)}<span class="time">${formatChatTime(m.created_at)}</span>
+    </div>`;
+  }).join("");
+  threadEl.scrollTop = threadEl.scrollHeight;
+
+  const unreadIds = (data ?? []).filter((m) => m.recipient_id === myProfile.id && !m.read_at).map((m) => m.id);
+  if (unreadIds.length) {
+    await supabase.from("staff_messages").update({ read_at: new Date().toISOString() }).in("id", unreadIds);
+    refreshStaffMessagesBadge();
+  }
+}
+
+// Делегиран listener, не по един на разгъване — toggleDetail пресъздава
+// формата при всяко отваряне и директният addEventListener щеше да
+// натрупва дубликати (и да праща едно съобщение по два пъти).
+document.addEventListener("submit", async (e) => {
+  const form = e.target;
+  if (!(form instanceof HTMLFormElement) || !form.id.startsWith("task-msg-form-")) return;
+  e.preventDefault();
+  const taskId = form.id.replace("task-msg-form-", "");
+  const task = currentTasksWithLatest.find(({ t }) => t.id === taskId)?.t;
+  if (!task) { showBanner("Задачата вече не е заредена — затвори и отвори детайла пак."); return; }
+  const input = document.getElementById(`task-msg-input-${taskId}`);
+  const body = input.value.trim();
+  const recipient = document.getElementById(`task-msg-recipient-${taskId}`).value;
+  if (!body) return;
+  if (!recipient) { showBanner("Няма на кого да го изпратя — няма друг активен потребител."); return; }
+  const { error } = await supabase.from("staff_messages").insert({
+    author_id: myProfile.id, recipient_id: recipient, body,
+    task_id: taskId, client_id: task.client_id ?? null,
+    context_label: taskContextLabel(task),
+  });
+  if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
+  input.value = "";
+  loadTaskThread(task);
 });
 
 // ---------------- AI помощник ----------------

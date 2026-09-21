@@ -267,11 +267,23 @@
   /* Балончето в прогрес-таблицата — тясна колона, затова само икона:
      сива при празна нишка, акцент при налични съобщения, с червено
      число при непрочетени. */
-  .msg-cell { text-align: center; padding-left: 2px; padding-right: 2px; }
-  .msg-btn { border: none; background: none; cursor: pointer; padding: 2px 4px; line-height: 1; color: var(--muted); position: relative; font-size: 1rem; }
-  .msg-btn:hover { color: var(--accent); }
-  .msg-btn.has-msgs { color: var(--accent); }
-  .msg-btn .n { position: absolute; top: -4px; right: -4px; background: var(--red); color: #fff; border-radius: 8px; font-size: .6rem; font-weight: 700; padding: 0 4px; line-height: 1.4; }
+  .msg-cell { text-align: center; padding-left: 4px; padding-right: 4px; width: 34px; }
+  .msg-btn {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--card); color: var(--muted);
+    cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+  }
+  .msg-btn svg { display: block; width: 14px; height: 14px; }
+  .msg-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  /* Празна нишка е тиха — забелязваш само тези, по които има разговор. */
+  .msg-btn.has-msgs { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+  .msg-btn .n {
+    position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center; padding: 0 3px;
+    background: var(--red); color: #fff; border: 2px solid var(--card); border-radius: 999px;
+    font-size: .58rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+  }
   #task-msg-thread { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; margin-bottom: 14px; padding-right: 2px; }
   #task-msg-thread:empty::after { content: "Няма съобщения по тази задача."; color: var(--muted); font-size: .85rem; }
 
@@ -4268,7 +4280,10 @@ function taskMsgCellHtml(taskId) {
   const c = taskMsgCounts[taskId];
   const has = !!c?.total;
   const title = has ? `${c.total} съобщения по задачата` : "Няма съобщения — щракни, за да напишеш";
-  return `<td class="msg-cell"><button type="button" class="msg-btn${has ? " has-msgs" : ""}" data-task-msg="${taskId}" title="${title}">💬${c?.unread ? `<span class="n">${c.unread}</span>` : ""}</button></td>`;
+  // Същата икона като таб "Съобщения" — иначе таблицата изглежда като
+  // друго приложение на мястото на тази една клетка.
+  const icon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H6.5L4 13.5V11.5H3a1 1 0 0 1-1-1z"/><path d="M5 6.5h6M5 8.8h4"/></svg>`;
+  return `<td class="msg-cell"><button type="button" class="msg-btn${has ? " has-msgs" : ""}" data-task-msg="${taskId}" title="${title}">${icon}${c?.unread ? `<span class="n">${c.unread}</span>` : ""}</button></td>`;
 }
 
 const taskMsgBackdrop = document.getElementById("task-msg-backdrop");

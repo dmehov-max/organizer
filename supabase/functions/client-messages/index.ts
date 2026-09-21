@@ -77,7 +77,7 @@ async function handler(req: Request): Promise<Response> {
       .eq("client_id", client.id).eq("sender", "staff").eq("read_by_client", false);
 
     const { data: messages, error: msgErr } = await admin
-      .from("client_messages").select("id, sender, body, created_at")
+      .from("client_messages").select("id, sender, body, created_at, context_label")
       .eq("client_id", client.id).order("created_at", { ascending: true }).limit(300);
     if (msgErr) {
       return new Response(JSON.stringify({ error: "Не успях да заредя нишката: " + msgErr.message }), { status: 500, headers: corsHeaders });

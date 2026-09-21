@@ -285,7 +285,11 @@
     font-size: .58rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
   }
   #task-msg-thread { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; margin-bottom: 14px; padding-right: 2px; }
-  #task-msg-thread:empty::after { content: "Няма съобщения по тази задача."; color: var(--muted); font-size: .85rem; }
+  .msg-mode-btn { width: auto; padding: 6px 14px; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 999px; cursor: pointer; font-size: .82rem; font-weight: 600; }
+  .msg-mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* Под балонче, изпратено до клиента: тръгнал ли е имейл и до кого.
+     Без това "изпратих му" е само надежда — клиентът няма логин. */
+  .bubble .mailed { display: block; font-size: .66rem; opacity: .85; margin-top: 3px; font-style: italic; }
 
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
@@ -843,10 +847,15 @@
   <div class="modal-backdrop" id="task-msg-backdrop">
     <div class="modal">
       <h2 id="task-msg-title">Съобщения по задачата</h2>
+      <div class="filter-toolbar" style="margin-bottom:12px">
+        <button type="button" class="msg-mode-btn active" data-msg-mode="staff">До колега</button>
+        <button type="button" class="msg-mode-btn" data-msg-mode="client">До клиента</button>
+      </div>
       <div id="task-msg-thread"></div>
-      <div class="filter-toolbar" style="margin-bottom:10px">
+      <div class="filter-toolbar" id="task-msg-recipient-row" style="margin-bottom:10px">
         <select id="task-msg-recipient"></select>
       </div>
+      <p class="hint" id="task-msg-hint" style="margin:0 0 10px; display:none"></p>
       <form id="task-msg-form" class="composer">
         <textarea id="task-msg-input" placeholder="Съобщение до колега по тази задача…" rows="1"></textarea>
         <button class="primary" type="submit">Изпрати</button>
@@ -1706,7 +1715,7 @@ async function loadTasks() {
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
       stage_creation_done_at, stage_review_done_at, stage_submission_done_at, note,
-      clients ( name, eik_egn, type, office_pays_obligations ),
+      clients ( name, eik_egn, type, office_pays_obligations, contact_emails ),
       obligation_types ( name, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id ),
       task_payments ( id, paid, paid_at )
@@ -4107,10 +4116,10 @@ document.getElementById("client-chat-form").addEventListener("submit", async (e)
   const input = document.getElementById("client-chat-input");
   const body = input.value.trim();
   if (!body || !currentChatClientId) return;
-  const { error } = await supabase.from("client_messages").insert({
-    client_id: currentChatClientId, sender: "staff", staff_id: myProfile.id, body, read_by_staff: true,
-  });
-  if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
+  // Минава през общата sendClientMessage (0070), за да тръгне и имейл
+  // — без контекст на задача, защото това е общият разговор от досието.
+  const ok = await sendClientMessage({ clientId: currentChatClientId, body });
+  if (!ok) return;
   input.value = "";
   await loadClientChat(currentChatClientId);
 });
@@ -4288,8 +4297,40 @@ function taskMsgCellHtml(taskId) {
 
 const taskMsgBackdrop = document.getElementById("task-msg-backdrop");
 let currentMsgTask = null;
+// "staff" = вътрешно, до колега (0069); "client" = навън, до клиента
+// (0061 + 0070). Двата режима делят един модал, защото за пишещия това
+// е един и същ въпрос — "за тази задача", разликата е само кой ще го
+// прочете. Режимът се помни, докато модалът е отворен.
+let msgMode = "staff";
 
-async function openTaskMessages(task) {
+function setMsgMode(mode) {
+  msgMode = mode;
+  document.querySelectorAll(".msg-mode-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.msgMode === mode));
+  // Получател се избира само при вътрешните — при клиента адресатът е
+  // самата фирма, няма какво да се избира.
+  document.getElementById("task-msg-recipient-row").style.display = mode === "staff" ? "" : "none";
+  const input = document.getElementById("task-msg-input");
+  input.placeholder = mode === "staff"
+    ? "Съобщение до колега по тази задача…"
+    : "Съобщение до клиента — тръгва и по имейл…";
+  const hint = document.getElementById("task-msg-hint");
+  if (mode === "client") {
+    const emails = currentMsgTask?.clients?.contact_emails ?? [];
+    hint.style.display = "";
+    hint.textContent = emails.length
+      ? `Имейлът ще отиде до: ${emails.join(", ")}`
+      : "⚠ Тази фирма няма въведени имейли в досието — съобщението ще остане само в страницата на клиента, писмо няма да тръгне.";
+  } else {
+    hint.style.display = "none";
+  }
+  if (currentMsgTask) loadTaskThread(currentMsgTask);
+}
+
+document.querySelectorAll(".msg-mode-btn").forEach((b) =>
+  b.addEventListener("click", () => setMsgMode(b.dataset.msgMode)));
+
+async function openTaskMessages(task, mode = "staff") {
   if (!task) return;
   currentMsgTask = task;
   document.getElementById("task-msg-title").textContent = `Съобщения — ${taskContextLabel(task)}`;
@@ -4304,10 +4345,11 @@ async function openTaskMessages(task) {
     const opt = [...sel.options].find((o) => o.value === task.assigned_user_id);
     if (opt) sel.value = task.assigned_user_id;
   }
-  await loadTaskThread(task);
+  setMsgMode(mode); // сам зарежда нишката за избрания режим
 }
 
 async function loadTaskThread(task) {
+  if (msgMode === "client") return loadClientTaskThread(task);
   const threadEl = document.getElementById("task-msg-thread");
   const { data, error } = await supabase.from("staff_messages")
     .select("id, author_id, recipient_id, body, created_at, read_at")
@@ -4320,7 +4362,7 @@ async function loadTaskThread(task) {
       <span class="who">${escapeHtml(mine ? "аз" : (usersById[m.author_id] ?? "?"))} → ${escapeHtml(usersById[m.recipient_id] ?? "?")}</span>
       ${escapeHtml(m.body)}<span class="time">${formatChatTime(m.created_at)}</span>
     </div>`;
-  }).join("");
+  }).join("") || `<div class="empty">Няма съобщения по тази задача.</div>`;
   threadEl.scrollTop = threadEl.scrollHeight;
 
   const unreadIds = (data ?? []).filter((m) => m.recipient_id === myProfile.id && !m.read_at).map((m) => m.id);
@@ -4335,6 +4377,77 @@ async function loadTaskThread(task) {
     btn.classList.toggle("has-msgs", (data ?? []).length > 0);
     btn.querySelector(".n")?.remove(); // непрочетените току-що станаха нула
   }
+}
+
+// Клиентът вижда ЕДНА нишка в upload.html, не отделна по задача —
+// затова и тук показваме целия разговор с фирмата, а тези по текущата
+// задача просто са отбелязани. Иначе счетоводителят би писал "както
+// говорихме", без да вижда какво всъщност е говорено.
+async function loadClientTaskThread(task) {
+  const threadEl = document.getElementById("task-msg-thread");
+  const clientId = task.client_id;
+  if (!clientId) { threadEl.innerHTML = `<div class="empty">Задачата няма клиент.</div>`; return; }
+
+  const { data, error } = await supabase.from("client_messages")
+    .select("id, sender, body, created_at, read_by_staff, task_id, context_label, emailed_at")
+    .eq("client_id", clientId).order("created_at", { ascending: true }).limit(300);
+  if (error) { threadEl.innerHTML = `<div class="empty">Грешка: ${escapeHtml(error.message)}</div>`; return; }
+
+  threadEl.innerHTML = (data ?? []).map((m) => {
+    const here = m.task_id === task.id;
+    const mailed = m.sender === "staff"
+      ? (m.emailed_at ? `<span class="mailed">✓ изпратено по имейл</span>` : `<span class="mailed">без имейл</span>`)
+      : "";
+    return `<div class="bubble ${m.sender}">
+      ${m.context_label ? `<span class="who">относно: ${escapeHtml(m.context_label)}${here ? "" : " (друга задача)"}</span>` : ""}
+      ${escapeHtml(m.body)}<span class="time">${formatChatTime(m.created_at)}</span>${mailed}
+    </div>`;
+  }).join("") || `<div class="empty">Още няма разговор с тази фирма.</div>`;
+  threadEl.scrollTop = threadEl.scrollHeight;
+
+  // Същото правило като в досието: отворил съм нишката, значи съм ги видял.
+  const unreadIds = (data ?? []).filter((m) => m.sender === "client" && !m.read_by_staff).map((m) => m.id);
+  if (unreadIds.length) {
+    await supabase.from("client_messages").update({ read_by_staff: true }).in("id", unreadIds);
+    refreshMessagesBadge();
+  }
+}
+
+/** Праща вече вмъкнатото съобщение по имейл до клиента. Отделно
+ * извикване, а не тригер в базата: ключът на Resend стои в Edge
+ * средата, а и искаме да кажем на човека дали е тръгнало. */
+async function emailClientMessage(messageId) {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session?.session?.access_token;
+  if (!token) return { ok: false, error: "няма активна сесия" };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-client-message`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Вмъква съобщение от нас към клиента и го праща по имейл. Общо за
+ * модала по задача и за чата от досието — иначе едното щеше да праща
+ * имейл, а другото не, и никой нямаше да помни кое. */
+async function sendClientMessage({ clientId, body, taskId = null, contextLabel = null }) {
+  const { data, error } = await supabase.from("client_messages").insert({
+    client_id: clientId, sender: "staff", staff_id: myProfile.id, body,
+    read_by_staff: true, task_id: taskId, context_label: contextLabel,
+  }).select("id").single();
+  if (error) { showBanner("Грешка при изпращане: " + error.message); return false; }
+
+  const mail = await emailClientMessage(data.id);
+  if (mail?.ok && mail.sent_to?.length) showBanner(`Изпратено и по имейл до ${mail.sent_to.join(", ")}.`, "ok");
+  else if (mail?.reason === "no_contact_emails") showBanner("Съобщението е записано, но фирмата няма имейл в досието — писмо не тръгна.");
+  else if (mail?.ok) showBanner("Съобщението е изпратено.", "ok");
+  else showBanner("Съобщението е записано, но имейлът не тръгна: " + (mail?.error ?? "неизвестна грешка"));
+  return true;
 }
 
 function closeTaskMessages() {
@@ -4361,8 +4474,20 @@ document.getElementById("task-msg-form").addEventListener("submit", async (e) =>
   if (!currentMsgTask) return;
   const input = document.getElementById("task-msg-input");
   const body = input.value.trim();
-  const recipient = document.getElementById("task-msg-recipient").value;
   if (!body) return;
+
+  if (msgMode === "client") {
+    const ok = await sendClientMessage({
+      clientId: currentMsgTask.client_id,
+      body,
+      taskId: currentMsgTask.id,
+      contextLabel: taskContextLabel(currentMsgTask),
+    });
+    if (ok) { input.value = ""; loadClientTaskThread(currentMsgTask); }
+    return;
+  }
+
+  const recipient = document.getElementById("task-msg-recipient").value;
   if (!recipient) { showBanner("Няма на кого да го изпратя — няма друг активен потребител."); return; }
   const { error } = await supabase.from("staff_messages").insert({
     author_id: myProfile.id, recipient_id: recipient, body,

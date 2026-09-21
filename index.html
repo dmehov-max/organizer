@@ -264,6 +264,16 @@
   .bubble.mine { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
   .bubble.theirs { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
   .bubble .who { display: block; font-size: .7rem; font-weight: 700; opacity: .85; margin-bottom: 2px; }
+  /* Балончето в прогрес-таблицата — тясна колона, затова само икона:
+     сива при празна нишка, акцент при налични съобщения, с червено
+     число при непрочетени. */
+  .msg-cell { text-align: center; padding-left: 2px; padding-right: 2px; }
+  .msg-btn { border: none; background: none; cursor: pointer; padding: 2px 4px; line-height: 1; color: var(--muted); position: relative; font-size: 1rem; }
+  .msg-btn:hover { color: var(--accent); }
+  .msg-btn.has-msgs { color: var(--accent); }
+  .msg-btn .n { position: absolute; top: -4px; right: -4px; background: var(--red); color: #fff; border-radius: 8px; font-size: .6rem; font-weight: 700; padding: 0 4px; line-height: 1.4; }
+  #task-msg-thread { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; margin-bottom: 14px; padding-right: 2px; }
+  #task-msg-thread:empty::after { content: "Няма съобщения по тази задача."; color: var(--muted); font-size: .85rem; }
 
   /* --- KPI лента (задачи) --- */
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
@@ -466,12 +476,12 @@
       <div class="table-wrap" id="progress-table-wrap" style="display:none; overflow-x:auto">
         <table>
           <thead><tr>
-            <th>№</th><th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
+            <th>№</th><th title="Съобщения по задачата">💬</th><th>Фирма</th><th>ЕИК</th><th>Период</th><th>Срок</th><th>Прогрес</th>
             <th>Създаване</th><th>Проверка</th><th>Подаване</th><th>Прието</th><th>Платено</th><th>Забележка</th>
           </tr></thead>
           <tbody id="progress-table-body"></tbody>
           <tfoot><tr class="progress-total-row">
-            <td colspan="5">Общ прогрес</td>
+            <td colspan="6">Общ прогрес</td>
             <td id="progress-total-pct"></td>
             <td id="progress-total-creation"></td>
             <td id="progress-total-review"></td>
@@ -814,6 +824,23 @@
       <div class="modal-actions">
         <button type="button" id="confirm-modal-cancel">Отказ</button>
         <button class="primary" type="button" id="confirm-modal-ok">Добре</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="task-msg-backdrop">
+    <div class="modal">
+      <h2 id="task-msg-title">Съобщения по задачата</h2>
+      <div id="task-msg-thread"></div>
+      <div class="filter-toolbar" style="margin-bottom:10px">
+        <select id="task-msg-recipient"></select>
+      </div>
+      <form id="task-msg-form" class="composer">
+        <textarea id="task-msg-input" placeholder="Съобщение до колега по тази задача…" rows="1"></textarea>
+        <button class="primary" type="submit">Изпрати</button>
+      </form>
+      <div class="modal-actions">
+        <button type="button" id="close-task-msg-btn">Затвори</button>
       </div>
     </div>
   </div>
@@ -1713,6 +1740,7 @@ async function loadTasks() {
   `;
 
   currentTasksWithLatest = withLatest;
+  await refreshTaskMessageCounts();
   populateObligationFilter(withLatest);
   populateResponsibleFilter("responsible-filter");
   renderObligationSummary(withLatest);
@@ -2179,6 +2207,7 @@ function renderProgressTable(sorted) {
     return `
       <tr data-task-id="${t.id}">
         <td>${i + 1}</td>
+        ${taskMsgCellHtml(t.id)}
         <td>${escapeHtml(t.clients?.name ?? "?")}</td>
         <td>${maskEgn(t.clients?.eik_egn, t.clients?.type)}</td>
         <td>${escapeHtml(t.period_label)}</td>
@@ -2604,20 +2633,15 @@ async function toggleDetail(card, task) {
     </div>
     <div class="detail-block" style="grid-column:1/-1">
       <h4>Съобщения по задачата</h4>
-      <div class="task-thread" id="task-thread-${task.id}"></div>
-      <div class="filter-toolbar" style="margin-bottom:8px">
-        <select id="task-msg-recipient-${task.id}"></select>
-      </div>
-      <form class="composer" id="task-msg-form-${task.id}">
-        <textarea id="task-msg-input-${task.id}" rows="1" placeholder="Съобщение до колега по тази задача…"></textarea>
-        <button class="primary" type="submit">Изпрати</button>
-      </form>
+      <button class="small" id="open-task-msg-${task.id}">Отвори нишката</button>
     </div>
   </div>`;
   card.after(detailDiv);
-  // Нишката (0069) се пълни без await — прикачените файлове и
-  // плащането по-долу са по-важни и не бива да чакат нея.
-  loadTaskThread(task);
+  // Нишката (0069) живее в общ модал, не вградена тук — същият, който
+  // отваря и балончето в прогрес-таблицата, за да няма два екрана за
+  // едно и също нещо.
+  document.getElementById(`open-task-msg-${task.id}`)
+    .addEventListener("click", () => openTaskMessages(task));
 
   // Прикачени файлове
   const { data: attachments } = await supabase
@@ -4209,7 +4233,12 @@ document.getElementById("sm-form").addEventListener("submit", async (e) => {
   loadStaffMessages();
 });
 
-// --- нишката в разгъната задача ---
+// --- нишката по задача: ЕДИН модал за двата изгледа ---
+// Реален пропуск, докладван на живо 21.09: първо сложих нишката само в
+// разгънатата карта, но картите се показват само когато НЯМА избрано
+// задължение — при избрано се показва прогрес-таблицата, а нейните
+// редове изобщо не се разгъват. Затова нишката вече е общ модал:
+// отваря се и от балончето в таблицата, и от бутона в картата.
 
 function taskContextLabel(task) {
   const obl = task.obligation_types?.name ?? "задача";
@@ -4217,19 +4246,54 @@ function taskContextLabel(task) {
   return `${obl} — ${client} (${task.period_label})`;
 }
 
-async function loadTaskThread(task) {
-  const threadEl = document.getElementById(`task-thread-${task.id}`);
-  if (!threadEl) return;
+// task_id -> { total, unread }. Пълни се веднъж при зареждане на
+// задачите: прогрес-таблицата се пре-рисува от кеша при всеки клик по
+// етап (renderTaskCards), а тя не бива да удря базата всеки път.
+let taskMsgCounts = {};
 
-  const sel = document.getElementById(`task-msg-recipient-${task.id}`);
+async function refreshTaskMessageCounts() {
+  const { data, error } = await supabase.from("staff_messages")
+    .select("task_id, recipient_id, read_at").not("task_id", "is", null).limit(2000);
+  if (error) return; // броячът е украса — не бива да чупи зареждането на задачите
+  const counts = {};
+  for (const m of data ?? []) {
+    const c = counts[m.task_id] ?? (counts[m.task_id] = { total: 0, unread: 0 });
+    c.total += 1;
+    if (m.recipient_id === myProfile?.id && !m.read_at) c.unread += 1;
+  }
+  taskMsgCounts = counts;
+}
+
+function taskMsgCellHtml(taskId) {
+  const c = taskMsgCounts[taskId];
+  const has = !!c?.total;
+  const title = has ? `${c.total} съобщения по задачата` : "Няма съобщения — щракни, за да напишеш";
+  return `<td class="msg-cell"><button type="button" class="msg-btn${has ? " has-msgs" : ""}" data-task-msg="${taskId}" title="${title}">💬${c?.unread ? `<span class="n">${c.unread}</span>` : ""}</button></td>`;
+}
+
+const taskMsgBackdrop = document.getElementById("task-msg-backdrop");
+let currentMsgTask = null;
+
+async function openTaskMessages(task) {
+  if (!task) return;
+  currentMsgTask = task;
+  document.getElementById("task-msg-title").textContent = `Съобщения — ${taskContextLabel(task)}`;
+  document.getElementById("task-msg-thread").innerHTML = `<div class="loading">Зареждане…</div>`;
+  taskMsgBackdrop.classList.add("open");
+
+  const sel = document.getElementById("task-msg-recipient");
   sel.innerHTML = recipientOptionsHtml();
   // По подразбиране пишеш на отговорника на задачата; ако това съм аз
-  // (или няма такъв), менюто остава на първия по азбучен ред.
+  // (или го няма в списъка), менюто остава на първия по азбучен ред.
   if (task.assigned_user_id && task.assigned_user_id !== myProfile?.id) {
     const opt = [...sel.options].find((o) => o.value === task.assigned_user_id);
     if (opt) sel.value = task.assigned_user_id;
   }
+  await loadTaskThread(task);
+}
 
+async function loadTaskThread(task) {
+  const threadEl = document.getElementById("task-msg-thread");
   const { data, error } = await supabase.from("staff_messages")
     .select("id, author_id, recipient_id, body, created_at, read_at")
     .eq("task_id", task.id).order("created_at", { ascending: true });
@@ -4249,31 +4313,50 @@ async function loadTaskThread(task) {
     await supabase.from("staff_messages").update({ read_at: new Date().toISOString() }).in("id", unreadIds);
     refreshStaffMessagesBadge();
   }
+  // Броячът в таблицата се обновява от същите данни, без втора заявка.
+  taskMsgCounts[task.id] = { total: (data ?? []).length, unread: 0 };
+  const btn = document.querySelector(`.msg-btn[data-task-msg="${task.id}"]`);
+  if (btn) {
+    btn.classList.toggle("has-msgs", (data ?? []).length > 0);
+    btn.querySelector(".n")?.remove(); // непрочетените току-що станаха нула
+  }
 }
 
-// Делегиран listener, не по един на разгъване — toggleDetail пресъздава
-// формата при всяко отваряне и директният addEventListener щеше да
-// натрупва дубликати (и да праща едно съобщение по два пъти).
-document.addEventListener("submit", async (e) => {
-  const form = e.target;
-  if (!(form instanceof HTMLFormElement) || !form.id.startsWith("task-msg-form-")) return;
+function closeTaskMessages() {
+  taskMsgBackdrop.classList.remove("open");
+  currentMsgTask = null;
+}
+document.getElementById("close-task-msg-btn").addEventListener("click", closeTaskMessages);
+taskMsgBackdrop.addEventListener("click", (e) => { if (e.target === taskMsgBackdrop) closeTaskMessages(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && taskMsgBackdrop.classList.contains("open")) closeTaskMessages(); });
+
+// Делегиран клик — прогрес-таблицата се пре-рисува непрекъснато, така
+// че директен addEventListener по бутон би се губил при всяко рисуване.
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("[data-task-msg]");
+  if (!btn) return;
+  e.stopPropagation(); // да не задейства клетките за етапи наоколо
+  const task = currentTasksWithLatest.find(({ t }) => t.id === btn.dataset.taskMsg)?.t;
+  if (!task) { showBanner("Задачата вече не е заредена — презареди списъка."); return; }
+  openTaskMessages(task);
+});
+
+document.getElementById("task-msg-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const taskId = form.id.replace("task-msg-form-", "");
-  const task = currentTasksWithLatest.find(({ t }) => t.id === taskId)?.t;
-  if (!task) { showBanner("Задачата вече не е заредена — затвори и отвори детайла пак."); return; }
-  const input = document.getElementById(`task-msg-input-${taskId}`);
+  if (!currentMsgTask) return;
+  const input = document.getElementById("task-msg-input");
   const body = input.value.trim();
-  const recipient = document.getElementById(`task-msg-recipient-${taskId}`).value;
+  const recipient = document.getElementById("task-msg-recipient").value;
   if (!body) return;
   if (!recipient) { showBanner("Няма на кого да го изпратя — няма друг активен потребител."); return; }
   const { error } = await supabase.from("staff_messages").insert({
     author_id: myProfile.id, recipient_id: recipient, body,
-    task_id: taskId, client_id: task.client_id ?? null,
-    context_label: taskContextLabel(task),
+    task_id: currentMsgTask.id, client_id: currentMsgTask.client_id ?? null,
+    context_label: taskContextLabel(currentMsgTask),
   });
   if (error) { showBanner("Грешка при изпращане: " + error.message); return; }
   input.value = "";
-  loadTaskThread(task);
+  loadTaskThread(currentMsgTask);
 });
 
 // ---------------- AI помощник ----------------

@@ -2488,12 +2488,23 @@ document.getElementById("check-drive-btn").addEventListener("click", async () =>
   btn.disabled = true;
   btn.textContent = "Проверява…";
   try {
-    const res = await fetch(CHECK_DRIVE_URL, { method: "POST" });
-    const data = await res.json();
+    // swift-worker е с verify_jwt — без токена на сесията връща 401.
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(CHECK_DRIVE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
-      showBanner("Грешка при проверка на Drive: " + (data.error ?? (data.errors ?? []).slice(0, 2).join("; ")));
+      showBanner("Грешка при проверка на Drive: " +
+        (data.error ?? data.msg ?? ((data.errors ?? []).slice(0, 2).join("; ") || `HTTP ${res.status}`)));
     } else {
-      showBanner(`Проверени ${data.checked} задачи, намерени файлове за ${data.found}.`, "ok");
+      showBanner(`Проверени ${data.checked} задачи, намерени файлове за ${data.found}. ` +
+        `Декл. обр. 1/6: проверени ${data.declarationsChecked ?? 0}, отметнати ${data.declarationsFound ?? 0}.`, "ok");
       loadTasks();
     }
   } catch (e) {

@@ -50,7 +50,10 @@ Supabase дава им случайно име, ако не смениш пол�
   secrets `GOOGLE_SERVICE_ACCOUNT_KEY` (цялото JSON на service account
   ключа) и `FIRMI_FOLDER_ID`. Ползва РЪЧЕН RS256 JWT подпис през Deno
   Web Crypto — `npm:google-auth-library` чупеше Supabase bundler-а
-  (виж git история). На живо като **`swift-worker`**.
+  (виж git история). На живо като **`swift-worker`**. Отмята сама
+  „Създаване“ на Декл. обр. 1 и 6 по файловете от Microinvest ТРЗ — виж
+  `functions/check-drive-files/DECLARATIONS.md`. Пуска се от cron
+  `drive_file_check_2h` на всеки 2 часа (0072).
 - `functions/create-user/` — admin добавя нов потребител директно от
   приложението (Потребители таб → "+ Нов потребител"). Проверява
   РЕАЛНО дали викащият е admin (JWT-scoped клиент, не се доверява на

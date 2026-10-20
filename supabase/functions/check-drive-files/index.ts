@@ -173,6 +173,120 @@ export function parseDeklarVatAmount(
 }
 
 // ---------------------------------------------------------------
+// Декл. обр. 1 и обр. 6 — засичане по ИМЕТО на файла от Microinvest
+// (поискано изрично 2026-10-20). Виж DECLARATIONS.md в тази папка.
+//
+// Microinvest ТРЗ генерира файлове за НАП с фиксиран формат на името:
+//   Обр. 1 → EMPL2021_<ЕИК>_<ММ>.<ГГГГ>_<N>.TXT
+//   Обр. 6 → NRA62007_<ЕИК>_<ММ>.<ГГГГ>_<N>.TXT
+// На живо те са пръснати непоследователно — в месечната папка, в
+// подпапка ТРЗ\, в "нови\", дори на ниво година, а месечната папка е
+// ту "05", ту "05.2026". Затова НЕ обхождаме папки, а търсим по име в
+// целия Drive: ЕИК + период в самото име са еднозначни — файл на
+// друга фирма или за друг месец просто не съвпада, където и да лежи.
+// ---------------------------------------------------------------
+
+/** Кой вид задължение се засича по кой файл. Префиксът за търсене в
+ * Drive е версията, която Microinvest пише днес; parseNapDeclaration-
+ * FileName() приема и бъдеща версия (EMPLxxxx/NRA6xxxx), но Drive
+ * търсенето е по точния префикс — при смяна на версията от
+ * Microinvest, добави новия префикс тук. */
+export const DECLARATION_FILES: Record<string, { kind: "obr1" | "obr6"; searchPrefixes: string[] }> = {
+  obr1: { kind: "obr1", searchPrefixes: ["EMPL2021"] },
+  obr6_monthly: { kind: "obr6", searchPrefixes: ["NRA62007"] },
+};
+
+/** Задължения, които НЕ бива да се маркират от общото правило "има
+ * нещо в месечната папка" — то е твърде грубо за тях (фактура в
+ * папката не значи, че декларацията е създадена; имейлът до клиента
+ * изобщо не е файл в Drive). */
+export const EXCLUDED_FROM_FOLDER_HEURISTIC = new Set(["obr1", "obr6_monthly", "contributions_email"]);
+
+/** ЕИК (9 цифри), ЕИК на клон (13) или ЕГН (10) — само цифри. Важно и
+ * за сигурността: стойността влиза в Drive заявка, затова НИЩО друго
+ * освен цифри не се пуска нататък. */
+export function isValidEik(eik: string | null | undefined): eik is string {
+  return typeof eik === "string" && /^(\d{9}|\d{10}|\d{13})$/.test(eik);
+}
+
+export type NapDeclarationFile = { kind: "obr1" | "obr6"; eik: string; year: number; month: number };
+
+/** Разпознава име на НАП файл от Microinvest. null = не е обр.1/обр.6
+ * (напр. "Преглед на Декларация Обр. 6.pdf", "EMPL_backup.txt"). */
+export function parseNapDeclarationFileName(name: string): NapDeclarationFile | null {
+  const m = /^(EMPL|NRA6)\d{4}_(\d{9,13})_(\d{2})\.(\d{4})_\d+[^._]*\.txt$/i.exec(name.trim());
+  if (!m) return null;
+  const month = Number(m[3]);
+  if (month < 1 || month > 12) return null;
+  return {
+    kind: m[1].toUpperCase() === "EMPL" ? "obr1" : "obr6",
+    eik: m[2],
+    month,
+    year: Number(m[4]),
+  };
+}
+
+/** Drive заявката за търсене на файла. Връща null при невалиден ЕИК
+ * или период — по-добре никакво търсене, отколкото заявка с чужди
+ * символи в нея. `name contains` в Drive е prefix-търсене, а нашият
+ * низ е точно началото на името — затова съвпада. */
+export function declarationSearchQuery(prefix: string, eik: string, year: number, month: number): string | null {
+  if (!/^[A-Z0-9]+$/.test(prefix) || !isValidEik(eik)) return null;
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+  const mm = String(month).padStart(2, "0");
+  return `name contains '${prefix}_${eik}_${mm}.${year}' and trashed = false and mimeType != 'application/vnd.google-apps.folder'`;
+}
+
+export type DriveFile = { id: string; name: string; mimeType: string; modifiedTime?: string };
+
+/** От резултатите на търсенето избира файла, който ТОЧНО отговаря на
+ * задачата (вид + ЕИК + месец + година) — Drive "contains" може да
+ * върне и повече, напр. ЕИК, който е префикс на 13-цифрен ЕИК на клон.
+ * При няколко копия (корекции "_5", копие в "нови\") — най-ранното,
+ * т.е. кога декларацията е създадена за първи път. */
+export function pickDeclarationFile(
+  files: DriveFile[],
+  want: NapDeclarationFile,
+): DriveFile | null {
+  const matching = files.filter((f) => {
+    if (f.mimeType === "application/vnd.google-apps.folder") return false;
+    const p = parseNapDeclarationFileName(f.name);
+    return !!p && p.kind === want.kind && p.eik === want.eik && p.year === want.year && p.month === want.month;
+  });
+  if (matching.length === 0) return null;
+  const time = (f: DriveFile) => {
+    const t = f.modifiedTime ? Date.parse(f.modifiedTime) : NaN;
+    return Number.isNaN(t) ? Infinity : t;
+  };
+  return [...matching].sort((a, b) => time(a) - time(b))[0];
+}
+
+/** Какво пишем в задачата при намерен файл. Отметката "Създаване" се
+ * слага само ако още не е сложена — ръчно отметната от счетоводителя
+ * остава с нейната дата. Статусът на задачата НЕ се пипа (както и
+ * ръчната отметка в таблото не го пипа). */
+export function buildDeclarationUpdate(
+  task: { stage_creation_done?: boolean | null },
+  file: DriveFile,
+  nowIso: string,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    files_generated_detected_at: nowIso,
+    files_generated_detected_path: file.name,
+  };
+  if (!task.stage_creation_done) {
+    const t = file.modifiedTime ? Date.parse(file.modifiedTime) : NaN;
+    // Дата в бъдещето (разминат часовник на сървъра) или липсваща → днес.
+    const at = !Number.isNaN(t) && t <= Date.parse(nowIso) ? new Date(t).toISOString() : nowIso;
+    payload.stage_creation_done = true;
+    payload.stage_creation_done_at = at;
+  }
+  return payload;
+}
+
+// ---------------------------------------------------------------
 // Drive API — тънка обвивка (не се тества директно, само чрез
 // чистите функции по-горе; мрежовите извиквания са интеграционни).
 // ---------------------------------------------------------------
@@ -188,6 +302,16 @@ async function driveListChildren(
   }&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`Drive list failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.files ?? [];
+}
+
+async function driveSearch(accessToken: string, q: string): Promise<DriveFile[]> {
+  const url = `${DRIVE_FILES_URL}?q=${encodeURIComponent(q)}&fields=${
+    encodeURIComponent("files(id,name,mimeType,modifiedTime)")
+  }&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Drive search failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return data.files ?? [];
 }
@@ -229,7 +353,7 @@ async function handler(req: Request): Promise<Response> {
     // не са завършени/неприложими.
     const { data: tasks, error: tasksErr } = await supabase
       .from("tasks")
-      .select("id, period_label, client_id, clients ( name ), obligation_types ( code )")
+      .select("id, period_label, client_id, stage_creation_done, clients ( name, eik_egn ), obligation_types ( code )")
       .is("files_generated_detected_at", null)
       .eq("not_applicable", false)
       .neq("status", "completed");
@@ -237,13 +361,42 @@ async function handler(req: Request): Promise<Response> {
 
     let checked = 0;
     let found = 0;
+    let declarationsChecked = 0;
+    let declarationsFound = 0;
+    const skipped: string[] = [];
     const errors: string[] = [];
     const clientFolderCache = new Map<string, { id: string; name: string } | null>();
+    const nowIso = new Date().toISOString();
 
     for (const task of (tasks ?? []) as any[]) {
       try {
         const ym = parseYearMonth(task.period_label);
         if (!ym) continue; // тримесечни/годишни задължения — извън обхвата тук засега
+        const code: string | undefined = (task.obligation_types as any)?.code;
+
+        // Декл. обр. 1 / обр. 6 — по името на файла, не по папки.
+        const decl = code ? DECLARATION_FILES[code] : undefined;
+        if (decl) {
+          const eik: string | undefined = task.clients?.eik_egn;
+          if (!isValidEik(eik)) {
+            skipped.push(`task ${task.id}: невалиден ЕИК "${eik ?? ""}"`);
+            continue;
+          }
+          declarationsChecked++;
+          const results: DriveFile[] = [];
+          for (const prefix of decl.searchPrefixes) {
+            const q = declarationSearchQuery(prefix, eik, ym.year, ym.month);
+            if (q) results.push(...await driveSearch(accessToken, q));
+          }
+          const file = pickDeclarationFile(results, { kind: decl.kind, eik, year: ym.year, month: ym.month });
+          if (!file) continue; // още не е генерирана — пак при следващото пускане
+          const { error: updErr } = await supabase.from("tasks").update(buildDeclarationUpdate(task, file, nowIso)).eq("id", task.id);
+          if (updErr) throw updErr;
+          declarationsFound++;
+          continue;
+        }
+        if (code && EXCLUDED_FROM_FOLDER_HEURISTIC.has(code)) continue;
+
         const clientName: string | undefined = task.clients?.name;
         if (!clientName) continue;
         checked++;
@@ -337,11 +490,14 @@ async function handler(req: Request): Promise<Response> {
     await supabase.from("cron_heartbeats").insert({
       job_name: JOB_NAME,
       status: errors.length === 0 ? "ok" : "error",
-      details: `checked=${checked} found=${found} errors=${errors.length}` +
+      details: `checked=${checked} found=${found} decl_checked=${declarationsChecked} decl_found=${declarationsFound}` +
+        ` skipped=${skipped.length} errors=${errors.length}` +
         (errors.length ? ` :: ${errors.slice(0, 5).join(" | ")}` : ""),
     });
 
-    return new Response(JSON.stringify({ ok: errors.length === 0, checked, found, errors }), {
+    return new Response(JSON.stringify({
+      ok: errors.length === 0, checked, found, declarationsChecked, declarationsFound, skipped, errors,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

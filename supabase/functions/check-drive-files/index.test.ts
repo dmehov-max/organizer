@@ -12,6 +12,7 @@ import {
   type DriveFile,
   EXCLUDED_FROM_FOLDER_HEURISTIC,
   folderNameMatchesClient,
+  isValidDriveFolderId,
   isValidEik,
   normalizeFolderName,
   parseDeklarVatAmount,
@@ -19,6 +20,7 @@ import {
   parseYearMonth,
   pemToArrayBuffer,
   pickDeclarationFile,
+  resolveClientFolder,
 } from "./index.ts";
 
 // Реален ред от СКРИЙН БОКС ООД/ДДС/07.2026/DEKLAR.txt (07.08.2026),
@@ -412,4 +414,69 @@ Deno.test("DECLARATION_FILES: обр.1 ↔ EMPL, обр.6 ↔ NRA6, префик
 Deno.test("EXCLUDED_FROM_FOLDER_HEURISTIC: декларациите и имейлът за вноски не се маркират от 'има нещо в папката'", () => {
   for (const c of ["obr1", "obr6_monthly", "contributions_email"]) assert(EXCLUDED_FROM_FOLDER_HEURISTIC.has(c), c);
   assertEquals(EXCLUDED_FROM_FOLDER_HEURISTIC.has("vat_declaration"), false);
+});
+
+// ---------- resolveClientFolder() — папка по clients.drive_folder_id (0073) ----------
+
+// Реални имена от Firmi (28.10.2026), ID-тата са измислени.
+const FIRMI_TOP = [
+  { id: "folder_gdm_grup_xx", name: "ДЖИ ДИ ЕМ ГРУП 2019" },
+  { id: "folder_korekt_prem", name: "КОРЕКТ ПРЕМЕСТВАНЕ  ООД" },
+  { id: "folder_pentanoi_xx", name: "ПЕНТАНОИ ЕООД" },
+  { id: "folder_screen_boxx", name: "СКРИЙН БОКС ООД" },
+];
+
+Deno.test("resolveClientFolder: има drive_folder_id → ползва него, без да чака списъка с папки", () => {
+  assertEquals(
+    resolveClientFolder({ name: "Петанои", drive_folder_id: "1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv" }, null),
+    { id: "1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv", name: "Петанои", source: "id" },
+  );
+});
+
+Deno.test("resolveClientFolder: ID-то печели пред съвпадение по име (ДЖИ ДИ ЕМ ГРУП ≠ ГРУП 2019)", () => {
+  const r = resolveClientFolder({ name: "ДЖИ ДИ ЕМ ГРУП", drive_folder_id: "1KTJpY5r9oYcGY0GSFEQpeIjTraq7dBWE" }, FIRMI_TOP);
+  assertEquals(r, { id: "1KTJpY5r9oYcGY0GSFEQpeIjTraq7dBWE", name: "ДЖИ ДИ ЕМ ГРУП", source: "id" });
+});
+
+Deno.test("resolveClientFolder: ID-то намира папки, които името пропуска (Корект Преместване ЕООД, Петанои)", () => {
+  // Без ID — по име не се намират:
+  assertEquals(resolveClientFolder({ name: "Корект Преместване ЕООД", drive_folder_id: null }, FIRMI_TOP), null);
+  assertEquals(resolveClientFolder({ name: "Петанои", drive_folder_id: null }, FIRMI_TOP), null);
+  // С ID — намират се:
+  const r = resolveClientFolder({ name: "Корект Преместване ЕООД", drive_folder_id: "1wS76AXZ01VhN1LBR1sU9Ngjfo_pGj1zg" }, FIRMI_TOP);
+  assertEquals(r !== null && r !== "needsTopFolders" ? r.source : null, "id");
+});
+
+Deno.test("resolveClientFolder: празно drive_folder_id и още няма списък → иска списъка с папки", () => {
+  assertEquals(resolveClientFolder({ name: "СКРИЙН БОКС ООД", drive_folder_id: null }, null), "needsTopFolders");
+  assertEquals(resolveClientFolder({ name: "СКРИЙН БОКС ООД", drive_folder_id: "" }, null), "needsTopFolders");
+  assertEquals(resolveClientFolder({ name: "СКРИЙН БОКС ООД" }, null), "needsTopFolders");
+});
+
+Deno.test("resolveClientFolder: празно drive_folder_id → резервно по име, с източник 'name'", () => {
+  assertEquals(
+    resolveClientFolder({ name: "Скрийн Бокс ООД", drive_folder_id: null }, FIRMI_TOP),
+    { id: "folder_screen_boxx", name: "СКРИЙН БОКС ООД", source: "name" },
+  );
+});
+
+Deno.test("resolveClientFolder: невалидно drive_folder_id → null, НЕ пада към името", () => {
+  assertEquals(resolveClientFolder({ name: "СКРИЙН БОКС ООД", drive_folder_id: "x' or '1'='1" }, FIRMI_TOP), null);
+  assertEquals(resolveClientFolder({ name: "СКРИЙН БОКС ООД", drive_folder_id: "short" }, null), null);
+});
+
+// ---------- isValidDriveFolderId() ----------
+
+Deno.test("isValidDriveFolderId: реални ID-та от Firmi минават", () => {
+  assert(isValidDriveFolderId("1--p_IUaWhqLZYeYo4nWTwhrIoZq3EnqN"));
+  assert(isValidDriveFolderId("1_AHAKUSOxLqC8b8KfUmpnczhv_Z02skb"));
+});
+
+Deno.test("isValidDriveFolderId: кавички, интервали, URL и празно се отхвърлят", () => {
+  assert(!isValidDriveFolderId("abc' in parents or '"));
+  assert(!isValidDriveFolderId("https://drive.google.com/drive/folders/1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv"));
+  assert(!isValidDriveFolderId("1sj4gMIT3Xq 57uup3qj"));
+  assert(!isValidDriveFolderId(""));
+  assert(!isValidDriveFolderId(null));
+  assert(!isValidDriveFolderId(undefined));
 });

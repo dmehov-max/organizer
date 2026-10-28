@@ -13,6 +13,9 @@
 // формат. Ако с времето се възприеме единен формат, candidateMonth-
 // FolderNames() може да се стесни.
 //
+// Папката на фирмата се взима от clients.drive_folder_id (0073);
+// засичане по име само ако полето е празно (виж resolveClientFolder).
+//
 // Изисква secrets:
 //   GOOGLE_SERVICE_ACCOUNT_KEY — цялото JSON съдържание на ключа
 //   FIRMI_FOLDER_ID            — ID-то на root папката "Firmi" в Drive
@@ -112,6 +115,39 @@ export function folderNameMatchesClient(folderName: string, clientName: string):
   const b = normalizeFolderName(clientName);
   if (!a || !b) return false;
   return a === b || a.includes(b) || b.includes(a);
+}
+
+/** ID на Drive папка — същото правило като CHECK-а на
+ * clients.drive_folder_id (0073). Важно и за сигурността: ID-то влиза
+ * в Drive заявка ("'<id>' in parents"), затова нищо друго не минава. */
+export function isValidDriveFolderId(id: string | null | undefined): id is string {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{10,100}$/.test(id);
+}
+
+export type ClientFolder = { id: string; name: string; source: "id" | "name" };
+
+/** Папката на фирмата в Firmi (0073, поискано изрично 2026-10-28):
+ * ако clients.drive_folder_id е попълнено — САМО то, без да гледаме
+ * имената (засичането по име грешеше: "ДЖИ ДИ ЕМ ГРУП" хващаше
+ * "ДЖИ ДИ ЕМ ГРУП 2019", а "Петанои" не намираше "ПЕНТАНОИ ЕООД").
+ * Иначе — резервно по име измежду topFolders (папките директно под
+ * Firmi). topFolders е null, докато не са изтеглени; връщаме
+ * "needsTopFolders", за да не викаме Drive излишно, когато има ID.
+ * Името в резултата е само за files_generated_detected_path. */
+export function resolveClientFolder(
+  client: { name: string; drive_folder_id?: string | null },
+  topFolders: { id: string; name: string }[] | null,
+): ClientFolder | null | "needsTopFolders" {
+  if (client.drive_folder_id != null && client.drive_folder_id !== "") {
+    // Попълнено, но невалидно ID не пада към името — по-добре нищо,
+    // отколкото тихо да хванем чужда папка.
+    return isValidDriveFolderId(client.drive_folder_id)
+      ? { id: client.drive_folder_id, name: client.name, source: "id" }
+      : null;
+  }
+  if (topFolders === null) return "needsTopFolders";
+  const match = topFolders.find((f) => folderNameMatchesClient(f.name, client.name));
+  return match ? { id: match.id, name: match.name, source: "name" } : null;
 }
 
 /** Кандидати за име на месечна папка под годишната — пробваме
@@ -353,7 +389,9 @@ async function handler(req: Request): Promise<Response> {
     // не са завършени/неприложими.
     const { data: tasks, error: tasksErr } = await supabase
       .from("tasks")
-      .select("id, period_label, client_id, stage_creation_done, clients ( name, eik_egn ), obligation_types ( code )")
+      .select(
+        "id, period_label, client_id, stage_creation_done, clients ( name, eik_egn, drive_folder_id ), obligation_types ( code )",
+      )
       .is("files_generated_detected_at", null)
       .eq("not_applicable", false)
       .neq("status", "completed");
@@ -365,7 +403,8 @@ async function handler(req: Request): Promise<Response> {
     let declarationsFound = 0;
     const skipped: string[] = [];
     const errors: string[] = [];
-    const clientFolderCache = new Map<string, { id: string; name: string } | null>();
+    const clientFolderCache = new Map<string, ClientFolder | null>();
+    let topFolders: { id: string; name: string }[] | null = null; // папките под Firmi — само ако потрябват
     const nowIso = new Date().toISOString();
 
     for (const task of (tasks ?? []) as any[]) {
@@ -403,18 +442,32 @@ async function handler(req: Request): Promise<Response> {
 
         // Клиентска папка — кеширана в рамките на това изпълнение, за
         // да не питаме Drive повторно за всяка задача на същия клиент.
-        let clientFolder = clientFolderCache.get(clientName);
+        const client = { name: clientName, drive_folder_id: task.clients?.drive_folder_id as string | null };
+        const cacheKey: string = task.client_id ?? clientName;
+        let clientFolder = clientFolderCache.get(cacheKey);
         if (clientFolder === undefined) {
-          const topFolders = await driveListChildren(
-            accessToken,
-            firmiFolderId,
-            " and mimeType = 'application/vnd.google-apps.folder'",
-          );
-          const match = topFolders.find((f) => folderNameMatchesClient(f.name, clientName));
-          clientFolder = match ? { id: match.id, name: match.name } : null;
-          clientFolderCache.set(clientName, clientFolder);
+          let resolved = resolveClientFolder(client, topFolders);
+          if (resolved === "needsTopFolders") {
+            topFolders = await driveListChildren(
+              accessToken,
+              firmiFolderId,
+              " and mimeType = 'application/vnd.google-apps.folder'",
+            );
+            resolved = resolveClientFolder(client, topFolders);
+          }
+          clientFolder = resolved === "needsTopFolders" ? null : resolved;
+          clientFolderCache.set(cacheKey, clientFolder);
+          if (client.drive_folder_id && !clientFolder) {
+            skipped.push(`клиент "${clientName}": невалиден drive_folder_id "${client.drive_folder_id}"`);
+          } else if (!client.drive_folder_id) {
+            // По веднъж на клиент — сигнал да се попълни drive_folder_id.
+            skipped.push(
+              `клиент "${clientName}": няма drive_folder_id — засичане по име` +
+                (clientFolder ? ` → "${clientFolder.name}"` : " → няма съвпадение"),
+            );
+          }
         }
-        if (!clientFolder) continue; // няма папка с това име в Firmi — нищо за проверка
+        if (!clientFolder) continue; // няма папка за този клиент — нищо за проверка
 
         // Основен път: [Фирма]/[Година]/[ММ или ММ.Година]/ — общата
         // месечна структура (наблюдавана на живо за повечето видове).

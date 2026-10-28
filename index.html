@@ -807,6 +807,7 @@
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
             <button type="button" id="copy-upload-link-btn" class="small">Копирай линк за качване от клиента</button>
             <button type="button" id="open-client-chat-btn" class="small">Съобщения<span class="tab-badge" id="client-chat-badge" style="display:none;margin-left:5px"></span></button>
+            <button type="button" id="open-drive-folder-btn" class="small" style="display:none">Папка в Drive</button>
           </div>
           <div class="form-row" style="align-items:start;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
             <label for="ec-contact-emails" style="margin-top:8px">Имейли</label>
@@ -3174,7 +3175,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations, drive_folder_url").eq("id", clientId).single();
 
   // Линк за клиента да качва документи сам (upload.html?t=<upload_token>,
   // без логин от негова страна) — виж миграция 0059. Копира в клипборда,
@@ -3190,6 +3191,12 @@ async function toggleClientSettings(tr) {
   };
   document.getElementById("open-client-chat-btn").onclick = () => openClientChat(clientId, clientName);
   refreshClientChatBadge(clientId);
+
+  // Папката на фирмата във Firmi (0073) — скрит бутон, ако няма ID.
+  const driveBtn = document.getElementById("open-drive-folder-btn");
+  const driveUrl = clientRow?.drive_folder_url;
+  driveBtn.style.display = driveUrl ? "" : "none";
+  driveBtn.onclick = () => window.open(driveUrl, "_blank", "noopener");
 
   // Смяна на отговорника — поискано изрично (2026-08-18). Отначало
   // само admin можеше да редактира тук; същия ден по-късно е

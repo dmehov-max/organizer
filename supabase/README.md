@@ -75,6 +75,11 @@ Supabase дава им случайно име, ако не смениш пол�
   директно през supabase-js (authenticated), не през тази функция.
   Виж README-то в папката — **след деплой запиши реалното име в
   `CLIENT_MESSAGES_URL` в `upload.html`.**
+- `functions/nap-confirmation-email/` — публична точка (без Auth, с
+  тайна в хедър `x-webhook-secret`), на която Apps Script в пощата на
+  Дойчин (`apps-script/nap-confirmations.gs`) праща потвържденията от
+  НАП; вписва „Подаване“ + входящия номер (0074). Виж README-то в
+  папката. Secret `NAP_MAIL_WEBHOOK_SECRET`.
 
 Виж `SPEC.md` в основната папка за пълния модел и обосновка, и
 `.env` (локално, gitignored) за текущите ключове.

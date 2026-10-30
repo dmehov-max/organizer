@@ -444,6 +444,10 @@
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8.5M8 10.5L5 7.5M8 10.5l3-3"/><path d="M2.5 11v1.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V11"/></svg>
         Входящи документи<span class="tab-badge" id="incoming-badge" style="display:none"></span>
       </button>
+      <button class="tab" data-tab="client-docs" id="client-docs-tab-btn">
+        <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M2 4l6 5 6-5"/></svg>
+        Документи от клиенти
+      </button>
       <button class="tab" data-tab="staff-messages" id="staff-messages-tab-btn">
         <svg class="tab-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H6.5L4 13.5V11.5H3a1 1 0 0 1-1-1z"/><path d="M5 6.5h6M5 8.8h4"/></svg>
         Съобщения<span class="tab-badge" id="staff-messages-badge" style="display:none"></span>
@@ -553,6 +557,29 @@
             <th>№</th><th>Фирма</th><th>Файл</th><th>Бележка от клиента</th><th>Получен</th><th>Статус</th><th>Забележка</th><th></th>
           </tr></thead>
           <tbody id="incoming-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="client-docs-panel" style="display:none">
+      <div class="filter-toolbar">
+        <select id="client-docs-period" aria-label="Месец на документите"></select>
+        <select id="client-docs-filter" aria-label="Филтър">
+          <option value="">Всички фирми</option>
+          <option value="open">Само без потвърждение</option>
+        </select>
+        <select id="client-docs-mode" aria-label="Вид писма" style="display:none">
+          <option value="live">Реални писма</option>
+          <option value="test">Тестови писма</option>
+        </select>
+        <span id="client-docs-summary" class="hint"></span>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>№</th><th>Фирма</th><th>ДДС</th><th>Писмо</th><th>Напомняне 1</th><th>Напомняне 2</th><th>Получено</th><th>Отговор</th>
+          </tr></thead>
+          <tbody id="client-docs-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -1353,6 +1380,7 @@ async function enterApp() {
   document.getElementById("clients-tab-btn").style.display = "";
   document.getElementById("users-tab-btn").style.display = profile.role === "admin" ? "" : "none";
   document.getElementById("statistics-tab-btn").style.display = profile.role === "admin" ? "" : "none";
+  document.getElementById("client-docs-mode").style.display = profile.role === "admin" ? "" : "none";
 
   // `active` се чете и тук (не само в admin таба) — падащото меню за
   // получател на вътрешно съобщение (0069) не бива да предлага спрян
@@ -1480,6 +1508,7 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     document.getElementById("clients-panel").style.display = tab === "clients" ? "" : "none";
     document.getElementById("inspections-panel").style.display = tab === "inspections" ? "" : "none";
     document.getElementById("incoming-panel").style.display = tab === "incoming" ? "" : "none";
+    document.getElementById("client-docs-panel").style.display = tab === "client-docs" ? "" : "none";
     document.getElementById("staff-messages-panel").style.display = tab === "staff-messages" ? "" : "none";
     document.getElementById("bookkeeping-panel").style.display = tab === "bookkeeping" ? "" : "none";
     document.getElementById("statistics-panel").style.display = tab === "statistics" ? "" : "none";
@@ -1487,6 +1516,7 @@ document.querySelectorAll("nav.tabs .tab").forEach((btn) => {
     if (tab === "clients") loadClients();
     if (tab === "inspections") loadInspections();
     if (tab === "incoming") loadIncomingDocuments();
+    if (tab === "client-docs") loadClientDocs();
     if (tab === "staff-messages") loadStaffMessages();
     if (tab === "bookkeeping") loadBookkeepingSummary();
     if (tab === "statistics") { loadBkTimeReport(); loadTaskTimeReport(); }
@@ -3983,6 +4013,119 @@ document.getElementById("new-inspection-form").addEventListener("submit", async 
   showBanner("Проверката/ревизията е добавена.", "ok");
   loadInspections();
 });
+
+// ---------------- Документи от клиенти (напомняния) ----------------
+// Показва писмата от vat-documents-reminder и отговорите на клиентите
+// за всички активни фирми, не само тези по ДДС, затова е отделен таб, а
+// не колона в таблицата на ДДС. Само за четене: записват функциите.
+// Месецът е този, за който се събират документите, тоест предходният.
+
+const CLIENT_DOCS_MONTHS = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"];
+const CLIENT_DOCS_KINDS = ["vat_documents", "vat_documents_2", "vat_documents_3"];
+
+function clientDocsPeriods() {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1);
+    return {
+      value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: `${CLIENT_DOCS_MONTHS[d.getMonth()]} ${d.getFullYear()}`,
+    };
+  });
+}
+
+function clientDocsTime(iso) {
+  return new Date(iso).toLocaleString("bg-BG", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Sofia",
+  });
+}
+
+function clientDocsSentCell(reminder) {
+  if (!reminder) return `<span style="color:var(--muted)">—</span>`;
+  if (reminder.status === "failed") {
+    return `<span class="pill pill-rejected" title="${escapeHtml(reminder.error ?? "")}">Неизпратено</span>`;
+  }
+  return clientDocsTime(reminder.sent_at);
+}
+
+/** Линкът е по-сигурният източник, затова е преди отговора по имейл. */
+function clientDocsAnswer(status, replies) {
+  if (status?.response === "done") return { cls: "accepted", text: "Качено", time: status.responded_at };
+  if (status?.response === "no_documents") return { cls: "accepted", text: "Няма документи", time: status.responded_at };
+  const done = replies.find((r) => r.classification === "done");
+  if (done) return { cls: "accepted", text: "Качено (имейл)", time: done.received_at, title: done.excerpt };
+  const question = replies.find((r) => r.classification === "question");
+  if (question) return { cls: "waiting", text: "Въпрос", time: question.received_at, title: question.excerpt };
+  return null;
+}
+
+async function loadClientDocs() {
+  const body = document.getElementById("client-docs-body");
+  const summary = document.getElementById("client-docs-summary");
+  const period = document.getElementById("client-docs-period").value;
+  const mode = document.getElementById("client-docs-mode").value;
+  const filter = document.getElementById("client-docs-filter").value;
+  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
+  summary.textContent = "";
+
+  const byPeriod = (query) => query.eq("period_label", period).eq("mode", mode);
+  const [clientsRes, vatRes, remindersRes, statusRes, repliesRes] = await Promise.all([
+    supabase.from("clients").select("id, name").eq("active", true).order("name"),
+    supabase.from("client_registrations")
+      .select("client_id, started_on, ended_on, registration_types!inner(code)")
+      .eq("registration_types.code", "vat"),
+    byPeriod(supabase.from("client_reminders").select("client_id, kind, status, error, sent_at")),
+    byPeriod(supabase.from("client_document_status").select("client_id, received_at, response, responded_at")),
+    byPeriod(supabase.from("client_reminder_replies").select("client_id, classification, excerpt, received_at")),
+  ]);
+  const failed = [clientsRes, vatRes, remindersRes, statusRes, repliesRes].find((r) => r.error);
+  if (failed) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${escapeHtml(failed.error.message)}</td></tr>`; return; }
+
+  const periodEnd = `${period}-31`;
+  const vatIds = new Set((vatRes.data ?? [])
+    .filter((r) => r.started_on <= periodEnd && (!r.ended_on || r.ended_on >= `${period}-01`))
+    .map((r) => r.client_id));
+  const statusById = new Map((statusRes.data ?? []).map((r) => [r.client_id, r]));
+
+  const rows = (clientsRes.data ?? []).map((client) => {
+    const reminders = (remindersRes.data ?? []).filter((r) => r.client_id === client.id);
+    const replies = (repliesRes.data ?? []).filter((r) => r.client_id === client.id);
+    const status = statusById.get(client.id);
+    return { client, reminders, status, answer: clientDocsAnswer(status, replies) };
+  });
+
+  const sentCount = rows.filter((r) => r.reminders.some((m) => m.kind === CLIENT_DOCS_KINDS[0] && m.status === "sent")).length;
+  const receivedCount = rows.filter((r) => r.status?.received_at).length;
+  const doneCount = rows.filter((r) => r.answer?.cls === "accepted").length;
+  summary.textContent = `Изпратени ${sentCount} от ${rows.length} · получени ${receivedCount} · потвърдени ${doneCount}`;
+
+  const shown = filter === "open" ? rows.filter((r) => r.answer?.cls !== "accepted") : rows;
+  if (shown.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма фирми за показване.</td></tr>`; return; }
+
+  body.innerHTML = shown.map(({ client, reminders, status, answer }, i) => {
+    const sentCells = CLIENT_DOCS_KINDS
+      .map((kind) => `<td>${clientDocsSentCell(reminders.find((m) => m.kind === kind))}</td>`).join("");
+    const answerCell = answer
+      ? `<span class="pill pill-${answer.cls}"${answer.title ? ` title="${escapeHtml(answer.title)}"` : ""}>${answer.text}</span>${answer.time ? ` <span class="hint">${clientDocsTime(answer.time)}</span>` : ""}`
+      : reminders.length > 0 ? `<span class="pill pill-waiting">Без отговор</span>` : `<span style="color:var(--muted)">—</span>`;
+    return `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(client.name)}</td>
+      <td>${vatIds.has(client.id) ? "Да" : "Не"}</td>
+      ${sentCells}
+      <td>${status?.received_at ? clientDocsTime(status.received_at) : `<span style="color:var(--muted)">—</span>`}</td>
+      <td>${answerCell}</td>
+    </tr>`;
+  }).join("");
+}
+
+(() => {
+  const select = document.getElementById("client-docs-period");
+  select.innerHTML = clientDocsPeriods().map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
+  ["client-docs-period", "client-docs-filter", "client-docs-mode"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", loadClientDocs));
+})();
 
 // ---------------- Входящи документи (от клиенти) ----------------
 // Опашка от файлове, качени от клиенти през upload.html (без логин от

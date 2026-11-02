@@ -849,6 +849,10 @@
           <div id="settings-panel">Зареждане…</div>
         </div>
       </div>
+      <div class="detail-block" style="margin-top:20px">
+        <h4>Декларации и задачи на клиента</h4>
+        <div id="client-tasks-panel">Зареждане…</div>
+      </div>
       <div class="form-table" style="margin-top:20px">
         <div class="form-row" style="align-items:start">
           <label for="ec-notes" style="margin-top:8px">Забележка</label>
@@ -3440,6 +3444,71 @@ async function toggleClientSettings(tr) {
       cb.disabled = false;
     });
   });
+
+  renderClientTasksPanel(clientId);
+}
+
+// Период "2026-09" → "09.2026", "2026-Q3" → "Q3 2026", "2026" → "2026".
+function periodLabelBg(label) {
+  const m = /^(\d{4})-(\d{2})$/.exec(label ?? "");
+  if (m) return `${m[2]}.${m[1]}`;
+  const q = /^(\d{4})-(Q\d)$/.exec(label ?? "");
+  if (q) return `${q[2]} ${q[1]}`;
+  return label ?? "";
+}
+
+// Всички декларации/задачи на клиента в досието (поискано изрично
+// 2026-11-03) — само преглед, по период отзад напред. Отметките
+// Създаване/Проверка/Подаване са същите като в прогрес-таблицата,
+// с датата под тях; промени се правят от таблото, не оттук.
+async function renderClientTasksPanel(clientId) {
+  const panel = document.getElementById("client-tasks-panel");
+  if (!panel) return;
+  const { data: tasks, error } = await supabase
+    .from("tasks")
+    .select("id, period_label, due_date, status, not_applicable, submission_reference_number, " +
+      "stage_creation_done, stage_review_done, stage_submission_done, " +
+      "stage_creation_done_at, stage_review_done_at, stage_submission_done_at, " +
+      "files_generated_detected_path, obligation_types ( name )")
+    .eq("client_id", clientId)
+    .order("due_date", { ascending: false });
+  if (error) { panel.innerHTML = `<div class="hint">Не успях да заредя задачите: ${escapeHtml(error.message)}</div>`; return; }
+  if (!tasks?.length) { panel.innerHTML = `<div class="hint">Няма генерирани задачи за този клиент.</div>`; return; }
+
+  const stage = (done, at) => done
+    ? `<td class="stage-cell stage-done" style="text-align:center">✓${at ? `<div class="ref-mini">${formatDateBg(at.slice(0, 10))}</div>` : ""}</td>`
+    : `<td class="stage-cell" style="text-align:center"></td>`;
+
+  panel.innerHTML = `
+    <div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+        <thead><tr style="position:sticky;top:0;background:var(--card)">
+          <th style="text-align:left;padding:6px 8px">Период</th>
+          <th style="text-align:left;padding:6px 8px">Задължение</th>
+          <th style="text-align:left;padding:6px 8px">Срок</th>
+          <th style="padding:6px 8px">Създаване</th>
+          <th style="padding:6px 8px">Проверка</th>
+          <th style="padding:6px 8px">Подаване</th>
+          <th style="text-align:left;padding:6px 8px">Статус</th>
+        </tr></thead>
+        <tbody>
+          ${tasks.map((t) => `
+            <tr style="border-top:1px solid var(--line)" title="${t.files_generated_detected_path ? `Файл: ${escapeHtml(t.files_generated_detected_path)}` : ""}">
+              <td style="padding:6px 8px;white-space:nowrap">${escapeHtml(periodLabelBg(t.period_label))}</td>
+              <td style="padding:6px 8px">${escapeHtml(t.obligation_types?.name ?? "")}</td>
+              <td style="padding:6px 8px;white-space:nowrap">${t.due_date ? formatDateBg(t.due_date) : ""}</td>
+              ${stage(t.stage_creation_done, t.stage_creation_done_at)}
+              ${stage(t.stage_review_done, t.stage_review_done_at)}
+              ${t.stage_submission_done
+                ? `<td class="stage-cell stage-done" style="text-align:center">✓${t.submission_reference_number ? `<div class="ref-mini">${escapeHtml(t.submission_reference_number)}</div>` : ""}${t.stage_submission_done_at ? `<div class="ref-mini">${formatDateBg(t.stage_submission_done_at.slice(0, 10))}</div>` : ""}</td>`
+                : `<td class="stage-cell" style="text-align:center"></td>`}
+              <td style="padding:6px 8px;white-space:nowrap">${t.not_applicable
+                ? `<span class="pill pill-completed">Не се дължи</span>`
+                : `<span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span>`}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // Изключването на задължение спира само БЪДЕЩОТО генериране

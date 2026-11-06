@@ -277,6 +277,30 @@ export function declarationSearchQuery(prefix: string, eik: string, year: number
 
 export type DriveFile = { id: string; name: string; mimeType: string; modifiedTime?: string };
 
+/** ЕСТИ справката (esti_monthly_report) се засича в подпапка ЕСТИ на
+ * месечната папка (напр. Фирма/2026/10.2026/ЕСТИ/). Имената са
+ * кирилица или латиница — така ги пишат счетоводителите. */
+export const ESTI_FOLDER_NAMES = ["ЕСТИ", "ESTI"];
+
+/** Справката за месец M се проверява от 1-во число на M+1 (тогава
+ * се генерира). Преди това папката е празна и проверката е излишна. */
+export function estiCheckAllowed(ym: { year: number; month: number }, now: Date): boolean {
+  const start = Date.UTC(ym.year, ym.month, 1); // month е 1-12 → Date.UTC(…, month) е 1-во на следващия
+  return now.getTime() >= start;
+}
+
+/** Първият (най-ранно променен) файл — не папка — в ЕСТИ папката.
+ * Null, ако е празна или има само подпапки. */
+export function pickEstiFile(files: DriveFile[]): DriveFile | null {
+  const only = files.filter((f) => f.mimeType !== "application/vnd.google-apps.folder");
+  if (only.length === 0) return null;
+  const time = (f: DriveFile) => {
+    const t = f.modifiedTime ? Date.parse(f.modifiedTime) : NaN;
+    return Number.isNaN(t) ? Infinity : t;
+  };
+  return [...only].sort((a, b) => time(a) - time(b))[0];
+}
+
 /** От резултатите на търсенето избира файла, който ТОЧНО отговаря на
  * задачата (вид + ЕИК + месец + година) — Drive "contains" може да
  * върне и повече, напр. ЕИК, който е префикс на 13-цифрен ЕИК на клон.
@@ -397,6 +421,22 @@ async function handler(req: Request): Promise<Response> {
       .neq("status", "completed");
     if (tasksErr) throw tasksErr;
 
+    // ЕСТИ задачи, засечени по стария груб метод (папката не е празна), но
+    // още без отметка "Създаване" — проверяваме ги пак в подпапка ЕСТИ.
+    const { data: estiTasks, error: estiTasksErr } = await supabase
+      .from("tasks")
+      .select(
+        "id, period_label, client_id, stage_creation_done, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
+      )
+      .not("files_generated_detected_at", "is", null)
+      .eq("stage_creation_done", false)
+      .eq("not_applicable", false)
+      .neq("status", "completed")
+      .eq("obligation_types.code", "esti_monthly_report");
+    if (estiTasksErr) throw estiTasksErr;
+    const seenIds = new Set((tasks ?? []).map((t: any) => t.id));
+    const allTasks = [...(tasks ?? []), ...(estiTasks ?? []).filter((t: any) => !seenIds.has(t.id))];
+
     let checked = 0;
     let found = 0;
     let declarationsChecked = 0;
@@ -407,7 +447,7 @@ async function handler(req: Request): Promise<Response> {
     let topFolders: { id: string; name: string }[] | null = null; // папките под Firmi — само ако потрябват
     const nowIso = new Date().toISOString();
 
-    for (const task of (tasks ?? []) as any[]) {
+    for (const task of allTasks as any[]) {
       try {
         const ym = parseYearMonth(task.period_label);
         if (!ym) continue; // тримесечни/годишни задължения — извън обхвата тук засега
@@ -495,6 +535,26 @@ async function handler(req: Request): Promise<Response> {
           }
         }
         if (!monthFolder) continue;
+
+        // ЕСТИ: само подпапка ЕСТИ/ESTI, само от 1-во число на следващия
+        // месец; качен файл → отметка "Създаване" (като при обр.1/обр.6).
+        if (code === "esti_monthly_report") {
+          if (!estiCheckAllowed(ym, new Date(nowIso))) continue;
+          let estiFolder: { id: string; name: string } | null = null;
+          for (const n of ESTI_FOLDER_NAMES) {
+            estiFolder = await findChildFolder(accessToken, monthFolder.id, n);
+            if (estiFolder) break;
+          }
+          if (!estiFolder) continue; // папката още не е създадена от счетоводителя
+          const estiFile = pickEstiFile(await driveListChildren(accessToken, estiFolder.id));
+          if (!estiFile) continue;
+          const payload = buildDeclarationUpdate(task, estiFile, nowIso);
+          payload.files_generated_detected_path = `${pathPrefix}/${monthFolder.name}/${estiFolder.name}/${estiFile.name}`;
+          const { error: estiErr } = await supabase.from("tasks").update(payload).eq("id", task.id);
+          if (estiErr) throw estiErr;
+          found++;
+          continue;
+        }
 
         const contents = await driveListChildren(accessToken, monthFolder.id);
         if (contents.length === 0) continue; // папката съществува, но е празна — все още нищо не е качено

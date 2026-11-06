@@ -4,3 +4,7 @@ node_modules/
 dist/
 .DS_Store
 .claude/
+
+# Клиентски данни извън публичното репо (виж supabase/private/README.md)
+supabase/private/*
+!supabase/private/README.md

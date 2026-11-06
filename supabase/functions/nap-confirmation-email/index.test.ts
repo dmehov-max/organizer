@@ -41,14 +41,14 @@ CONFIRMATION OF RECEIPT
 const VAT_MD = `| ПОТВЪРЖДЕНИЕ ЗА ПОЛУЧАВАНЕ |
 | |
 | Уникален регистров идентификатор на получения документ: | 30E012634936 / 13.07.2026 12:31:26 |
-| Заявител на електронната административна услуга: | МЕХОВИ АУТО ЕООД, VIN BG208199054 |
+| Заявител на електронната административна услуга: | МЕХОВИ АУТО ЕООД, VIN BG100000001 |
 | Подаден документ: | Месечна справка-декларация по ЗДДС за период: 202606 |
-| Applicant of electronic administrative service: | МЕХОВИ АУТО ЕООД,, VIN BG208199054 |`;
+| Applicant of electronic administrative service: | МЕХОВИ АУТО ЕООД,, VIN BG100000001 |`;
 
 // Чл. 55 — ЕИК „по ТР/БУЛСТАТ“, вид, който Органайзерът не следи.
 const CHL55_MD = `| ПОТВЪРЖДЕНИЕ ЗА ПОЛУЧАВАНЕ |
 | Уникален регистров идентификатор на получения документ: | 2210И2019538 / 29.10.2026 12:43:27 |
-| Заявител на електронната административна услуга: | ДЖИ ДИ ЕМ ГРУП 2019, ЕИК по ТР/БУЛСТАТ 205482691 |
+| Заявител на електронната административна услуга: | ДЖИ ДИ ЕМ ГРУП 2019, ЕИК по ТР/БУЛСТАТ 100000005 |
 | Подаден документ: | Декларация по чл. 55, ал. 1 от ЗДДФЛ и чл. 201, ал. 1 от ЗКПО за 2026 г. за период: от 01.07.2026 до 30.09.2026 |`;
 
 // Същото като OBR16, но като HTML — Apps Script праща getBody().
@@ -59,11 +59,11 @@ const OBR16_HTML = `<html><body><table>
 </table></body></html>`;
 
 const CLIENTS: ClientRow[] = [
-  { id: "c-milenium", name: "АИПДП-МИЛЕНИУМ ДЕНТАЛ КЕЪР ЕООД", eik_egn: "207785185" },
-  { id: "c-vizh", name: "ВИЖУАЛАЙЗ ООД", eik_egn: "206521026" },
-  { id: "c-mehovi", name: "МЕХОВИ АУТО ЕООД", eik_egn: "208199054" },
-  { id: "c-gdm", name: "ДЖИ ДИ ЕМ ГРУП", eik_egn: "202713730" },
-  { id: "c-gdm19", name: "ДЖИ ДИ ЕМ ГРУП 2019 ЕООД", eik_egn: "205482691" },
+  { id: "c-dental", name: "АИПДП-МИЛЕНИУМ ДЕНТАЛ КЕЪР ЕООД", eik_egn: "100000007" },
+  { id: "c-vizh", name: "ВИЖУАЛАЙЗ ООД", eik_egn: "100000008" },
+  { id: "c-auto", name: "МЕХОВИ АУТО ЕООД", eik_egn: "100000001" },
+  { id: "c-gdm", name: "ДЖИ ДИ ЕМ ГРУП", eik_egn: "100000010" },
+  { id: "c-gdm19", name: "ДЖИ ДИ ЕМ ГРУП 2019 ЕООД", eik_egn: "100000005" },
 ];
 
 // ---------- parseNapConfirmation() ----------
@@ -81,7 +81,7 @@ Deno.test("parse: обр. 1/6 — номер, дата, име без ЕИК, д
 
 Deno.test("parse: ДДС — ЕИК от 'VIN BG…', името без него", () => {
   const p = parseNapConfirmation(VAT_MD)!;
-  assertEquals(p.applicantEik, "208199054");
+  assertEquals(p.applicantEik, "100000001");
   assertEquals(p.applicantName, "МЕХОВИ АУТО ЕООД");
   assertEquals(p.referenceNumber, "30E012634936");
   assertEquals(p.referenceDate, "2026-07-13");
@@ -89,7 +89,7 @@ Deno.test("parse: ДДС — ЕИК от 'VIN BG…', името без него
 
 Deno.test("parse: чл. 55 — ЕИК 'по ТР/БУЛСТАТ', номер с кирилско И", () => {
   const p = parseNapConfirmation(CHL55_MD)!;
-  assertEquals(p.applicantEik, "205482691");
+  assertEquals(p.applicantEik, "100000005");
   assertEquals(p.applicantName, "ДЖИ ДИ ЕМ ГРУП 2019");
   assertEquals(p.referenceNumber, "2210И2019538");
 });
@@ -145,7 +145,7 @@ Deno.test("normalizeNapName: маха правната форма и пункт�
 });
 
 Deno.test("resolveClient: ЕИК в писмото → по ЕИК", () => {
-  assertEquals(resolveClient(parseNapConfirmation(VAT_MD)!, CLIENTS, new Map()), { clientId: "c-mehovi", matchedBy: "eik" });
+  assertEquals(resolveClient(parseNapConfirmation(VAT_MD)!, CLIENTS, new Map()), { clientId: "c-auto", matchedBy: "eik" });
 });
 
 Deno.test("resolveClient: чужд ЕИК → null, НЕ пада към името", () => {
@@ -167,8 +167,8 @@ Deno.test("resolveClient: 'ДЖИ ДИ ЕМ ГРУП' НЕ хваща 'ДЖИ Д
 Deno.test("resolveClient: пълното име от НАП (амбулатория) без псевдоним → null; с псевдоним → клиентът", () => {
   const c = parseNapConfirmation(OBR16_MD)!;
   assertEquals(resolveClient(c, CLIENTS, new Map()), null);
-  const aliases = new Map([[normalizeNapName(c.applicantName), "c-milenium"]]);
-  assertEquals(resolveClient(c, CLIENTS, aliases), { clientId: "c-milenium", matchedBy: "alias" });
+  const aliases = new Map([[normalizeNapName(c.applicantName), "c-dental"]]);
+  assertEquals(resolveClient(c, CLIENTS, aliases), { clientId: "c-dental", matchedBy: "alias" });
 });
 
 Deno.test("resolveClient: две фирми с едно и също нормализирано име → null", () => {

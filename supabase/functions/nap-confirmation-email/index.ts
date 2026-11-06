@@ -81,7 +81,7 @@ export function parseNapConfirmation(text: string): NapConfirmation | null {
   const r = /^([0-9A-Za-zА-Яа-я]+)\s*\/\s*(\d{2})\.(\d{2})\.(\d{4})/.exec(reg);
   if (!r) return null;
 
-  // ДДС: „МЕХОВИ АУТО ЕООД, VIN BG208199054“; други: „…, ЕИК по ТР/БУЛСТАТ 205482691“;
+  // ДДС: „МЕХОВИ АУТО ЕООД, VIN BG100000001“; други: „…, ЕИК по ТР/БУЛСТАТ 100000005“;
   // обр. 1/6: само име, без ЕИК.
   const eikMatch = /(?:VIN\s*BG|ЕИК[^\d]{0,20})(\d{9,13})\b/i.exec(applicant);
   const applicantName = applicant.split(/,\s*(?:VIN|ЕИК)/i)[0].replace(/[,\s]+$/, "").trim();

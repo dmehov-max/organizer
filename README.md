@@ -49,6 +49,33 @@ custom domain по избор — все още не е сложен).
 GitHub Pages, или пусни локален статичен сървър в тази папка, напр.
 `npx serve` (изисква Node.js), и отвори адреса, който покаже.
 
+## Тестове — минават при всеки push
+
+Репото е публично, затова при **всеки push** GitHub Actions
+(`.github/workflows/tests.yml`) пуска всичко по-долу и показва ✓/✗ до
+записването. Нищо не се смята за готово, ако нещо е червено.
+
+| Какво | Команда |
+|---|---|
+| Типове на Edge Functions | `deno check supabase/functions/*/index.ts` |
+| Unit тестове на функциите (чиста логика, без живата база) | `deno test --allow-net --allow-env supabase/functions/` |
+| Хигиена: без клиентски данни (ЕИК, Drive ID, имена) и тайни в git | `deno test --allow-read --allow-run=git supabase/tests/hygiene.test.ts` |
+| Жива сигурност: без вход нищо не се чете/пише в production (само публичния ключ) | `deno test --allow-net --allow-env --allow-read supabase/tests/live_security.test.ts` |
+| Синтаксис на `index.html` / `upload.html` / `confirm.html` | виж стъпката в workflow-а |
+
+Локално, всичко наведнъж:
+
+```
+deno check supabase/functions/*/index.ts && deno test --allow-net --allow-env --allow-read --allow-run=git supabase/
+```
+
+Правила: клиентски данни **никога** в git (виж
+`supabase/private/README.md`); тестовете ползват измислени фирми и
+ЕИК от вида `1000000NN`. Нова функция → `index.test.ts` до нея за
+чистите функции и лошите сценарии. Промяна по сигурността → ако
+променя какво може да се прави без вход, добави проверка в
+`live_security.test.ts`.
+
 ## Стек
 
 - Frontend: статичен сайт → GitHub Pages

@@ -27,12 +27,12 @@ import {
 // само буквено-цифровата обвивка е скъсена/подменена с плейсхолдъри —
 // числовата опашка (единствената, която се парсва) е непроменена.
 const REAL_DEKLAR_LINE =
-  "BG202990987    ПЛЕЙСХОЛДЪР ООД                                   2026077910037580/ПЛЕЙСХОЛДЪР ИМЕ                                  1              6         110.94          22.19         110.94          22.19           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.83         100.90          20.18           0.00           0.00           0.00           0.00          20.18           2.01           0.00           0.00           2.01           0.00           0.00           0.00";
+  "BG100000009    ПЛЕЙСХОЛДЪР ООД                                   2026077910037580/ПЛЕЙСХОЛДЪР ИМЕ                                  1              6         110.94          22.19         110.94          22.19           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.00           0.83         100.90          20.18           0.00           0.00           0.00           0.00          20.18           2.01           0.00           0.00           2.01           0.00           0.00           0.00";
 
 // ---------- normalizeFolderName() ----------
 
 Deno.test("normalizeFolderName: свива двойни интервали (реален случай в Firmi)", () => {
-  assertEquals(normalizeFolderName("КОРЕКТ ПРЕМЕСТВАНЕ  ООД"), "корект преместване оод");
+  assertEquals(normalizeFolderName("ПРИМЕРНО ПРЕМЕСТВАНЕ  ООД"), "примерно преместване оод");
 });
 
 Deno.test("normalizeFolderName: тримва краищата", () => {
@@ -42,11 +42,11 @@ Deno.test("normalizeFolderName: тримва краищата", () => {
 // ---------- folderNameMatchesClient() ----------
 
 Deno.test("folderNameMatchesClient: точно съвпадение (без чувствителност към регистър/интервали)", () => {
-  assertEquals(folderNameMatchesClient("Корект Преместване ООД", "корект преместване  оод"), true);
+  assertEquals(folderNameMatchesClient("Примерно Преместване ООД", "примерно преместване  оод"), true);
 });
 
 Deno.test("folderNameMatchesClient: папката съдържа името на клиента", () => {
-  assertEquals(folderNameMatchesClient("Корект Преместване ООД (архив)", "Корект Преместване ООД"), true);
+  assertEquals(folderNameMatchesClient("Примерно Преместване ООД (архив)", "Примерно Преместване ООД"), true);
 });
 
 Deno.test("folderNameMatchesClient: различни клиенти не съвпадат", () => {
@@ -165,38 +165,38 @@ Deno.test("parseDeklarVatAmount: за възстановяване — кл.60 �
 const TXT = "text/plain";
 const file = (name: string, modifiedTime?: string, mimeType = TXT): DriveFile =>
   ({ id: name, name, mimeType, modifiedTime });
-const WANT_OBR1_SEP = { kind: "obr1" as const, eik: "204470152", year: 2026, month: 9 };
+const WANT_OBR1_SEP = { kind: "obr1" as const, eik: "100000002", year: 2026, month: 9 };
 
 // ---------- parseNapDeclarationFileName() — добри случаи ----------
 
 Deno.test("parseNapDeclarationFileName: обр.1 (EMPL2021), реално име", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_09.2026_1.TXT"),
-    { kind: "obr1", eik: "204470152", year: 2026, month: 9 });
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_09.2026_1.TXT"),
+    { kind: "obr1", eik: "100000002", year: 2026, month: 9 });
 });
 
 Deno.test("parseNapDeclarationFileName: обр.6 (NRA62007), реално име", () => {
-  assertEquals(parseNapDeclarationFileName("NRA62007_175323940_12.2025_1.TXT"),
-    { kind: "obr6", eik: "175323940", year: 2025, month: 12 });
+  assertEquals(parseNapDeclarationFileName("NRA62007_100000003_12.2025_1.TXT"),
+    { kind: "obr6", eik: "100000003", year: 2025, month: 12 });
 });
 
 Deno.test("parseNapDeclarationFileName: пореден номер >1 (корекция, '_5'/'_6') се приема", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_175323940_07.2026_6.TXT")?.kind, "obr1");
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000003_07.2026_6.TXT")?.kind, "obr1");
 });
 
 Deno.test("parseNapDeclarationFileName: ръчно преименувано копие '_1з' се приема (реален случай)", () => {
-  assertEquals(parseNapDeclarationFileName("NRA62007_204186426_01.2026_1з.TXT")?.kind, "obr6");
+  assertEquals(parseNapDeclarationFileName("NRA62007_100000004_01.2026_1з.TXT")?.kind, "obr6");
 });
 
 Deno.test("parseNapDeclarationFileName: малки букви в разширението/префикса", () => {
-  assertEquals(parseNapDeclarationFileName("empl2021_204470152_09.2026_1.txt")?.kind, "obr1");
+  assertEquals(parseNapDeclarationFileName("empl2021_100000002_09.2026_1.txt")?.kind, "obr1");
 });
 
 Deno.test("parseNapDeclarationFileName: бъдеща версия на формата (EMPL2027) се разпознава", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2027_204470152_09.2026_1.TXT")?.kind, "obr1");
+  assertEquals(parseNapDeclarationFileName("EMPL2027_100000002_09.2026_1.TXT")?.kind, "obr1");
 });
 
 Deno.test("parseNapDeclarationFileName: 13-цифрен ЕИК на клон", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_2044701520001_09.2026_1.TXT")?.eik, "2044701520001");
+  assertEquals(parseNapDeclarationFileName("EMPL2021_1000000020001_09.2026_1.TXT")?.eik, "1000000020001");
 });
 
 // ---------- parseNapDeclarationFileName() — лоши случаи ----------
@@ -211,32 +211,32 @@ Deno.test("parseNapDeclarationFileName: другите ТРЗ файлове в 
     "Дължими вноски към НАП - кратка 2026.09.pdf",
     "Рекапитулация - стандартна 2026.09.pdf",
     "ПЛАТЕЖНИ.pdf",
-    "ETZ175323940.xml",
+    "ETZ100000003.xml",
     "DEKLAR.txt",
   ]) assertEquals(parseNapDeclarationFileName(n), null, n);
 });
 
 Deno.test("parseNapDeclarationFileName: правилен префикс, но не .TXT (.pdf/.zip) → null", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_09.2026_1.pdf"), null);
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_09.2026_1.TXT.zip"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_09.2026_1.pdf"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_09.2026_1.TXT.zip"), null);
 });
 
 Deno.test("parseNapDeclarationFileName: невалиден месец (00, 13) → null", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_00.2026_1.TXT"), null);
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_13.2026_1.TXT"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_00.2026_1.TXT"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_13.2026_1.TXT"), null);
 });
 
 Deno.test("parseNapDeclarationFileName: месец без водеща нула ('9.2026') → null", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_9.2026_1.TXT"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_9.2026_1.TXT"), null);
 });
 
 Deno.test("parseNapDeclarationFileName: ЕИК с букви или твърде къс → null", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_BG204470152_09.2026_1.TXT"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_BG100000002_09.2026_1.TXT"), null);
   assertEquals(parseNapDeclarationFileName("EMPL2021_2044_09.2026_1.TXT"), null);
 });
 
 Deno.test("parseNapDeclarationFileName: без пореден номер → null", () => {
-  assertEquals(parseNapDeclarationFileName("EMPL2021_204470152_09.2026.TXT"), null);
+  assertEquals(parseNapDeclarationFileName("EMPL2021_100000002_09.2026.TXT"), null);
 });
 
 Deno.test("parseNapDeclarationFileName: случаен файл с подобно начало ('EMPL_backup.txt') → null", () => {
@@ -251,13 +251,13 @@ Deno.test("parseNapDeclarationFileName: празно име → null", () => {
 // ---------- isValidEik() ----------
 
 Deno.test("isValidEik: 9/10/13 цифри са валидни", () => {
-  assert(isValidEik("204470152"));
+  assert(isValidEik("100000002"));
   assert(isValidEik("8001011234"));
-  assert(isValidEik("2044701520001"));
+  assert(isValidEik("1000000020001"));
 });
 
 Deno.test("isValidEik: null/празно/с букви/с BG/с интервал → невалиден", () => {
-  for (const v of [null, undefined, "", "BG204470152", "204 470 152", "20447015", "12345678901"]) {
+  for (const v of [null, undefined, "", "BG100000002", "204 470 152", "20447015", "12345678901"]) {
     assertEquals(isValidEik(v), false, String(v));
   }
 });
@@ -266,24 +266,24 @@ Deno.test("isValidEik: null/празно/с букви/с BG/с интервал
 
 Deno.test("declarationSearchQuery: точен prefix за Drive, без папки и кошче", () => {
   assertEquals(
-    declarationSearchQuery("EMPL2021", "204470152", 2026, 9),
-    "name contains 'EMPL2021_204470152_09.2026' and trashed = false and mimeType != 'application/vnd.google-apps.folder'",
+    declarationSearchQuery("EMPL2021", "100000002", 2026, 9),
+    "name contains 'EMPL2021_100000002_09.2026' and trashed = false and mimeType != 'application/vnd.google-apps.folder'",
   );
 });
 
 Deno.test("declarationSearchQuery: инжекция през ЕИК (кавичка) → null, никаква заявка", () => {
-  assertEquals(declarationSearchQuery("EMPL2021", "204470152' or name contains '", 2026, 9), null);
+  assertEquals(declarationSearchQuery("EMPL2021", "100000002' or name contains '", 2026, 9), null);
 });
 
 Deno.test("declarationSearchQuery: инжекция през префикс → null", () => {
-  assertEquals(declarationSearchQuery("EMPL' or '1'='1", "204470152", 2026, 9), null);
+  assertEquals(declarationSearchQuery("EMPL' or '1'='1", "100000002", 2026, 9), null);
 });
 
 Deno.test("declarationSearchQuery: невалиден период → null", () => {
-  assertEquals(declarationSearchQuery("EMPL2021", "204470152", 2026, 0), null);
-  assertEquals(declarationSearchQuery("EMPL2021", "204470152", 2026, 13), null);
-  assertEquals(declarationSearchQuery("EMPL2021", "204470152", 26, 9), null);
-  assertEquals(declarationSearchQuery("EMPL2021", "204470152", NaN, 9), null);
+  assertEquals(declarationSearchQuery("EMPL2021", "100000002", 2026, 0), null);
+  assertEquals(declarationSearchQuery("EMPL2021", "100000002", 2026, 13), null);
+  assertEquals(declarationSearchQuery("EMPL2021", "100000002", 26, 9), null);
+  assertEquals(declarationSearchQuery("EMPL2021", "100000002", NaN, 9), null);
 });
 
 // ---------- pickDeclarationFile() — лоши сценарии ----------
@@ -293,29 +293,29 @@ Deno.test("pickDeclarationFile: няма резултати → null (декла
 });
 
 Deno.test("pickDeclarationFile: файл на ДРУГА фирма (друг ЕИК) не маркира", () => {
-  assertEquals(pickDeclarationFile([file("EMPL2021_175323940_09.2026_1.TXT")], WANT_OBR1_SEP), null);
+  assertEquals(pickDeclarationFile([file("EMPL2021_100000003_09.2026_1.TXT")], WANT_OBR1_SEP), null);
 });
 
 Deno.test("pickDeclarationFile: 13-цифрен ЕИК на клон, започващ със същия ЕИК, не маркира фирмата", () => {
   // Drive "contains" е prefix-търсене — ще върне и клона; трябва да го отсеем.
-  assertEquals(pickDeclarationFile([file("EMPL2021_2044701520001_09.2026_1.TXT")], WANT_OBR1_SEP), null);
+  assertEquals(pickDeclarationFile([file("EMPL2021_1000000020001_09.2026_1.TXT")], WANT_OBR1_SEP), null);
 });
 
 Deno.test("pickDeclarationFile: файл за ДРУГ месец (август в септемврийска папка) не маркира септември", () => {
-  assertEquals(pickDeclarationFile([file("EMPL2021_204470152_08.2026_1.TXT")], WANT_OBR1_SEP), null);
+  assertEquals(pickDeclarationFile([file("EMPL2021_100000002_08.2026_1.TXT")], WANT_OBR1_SEP), null);
 });
 
 Deno.test("pickDeclarationFile: същият месец, ДРУГА година не маркира", () => {
-  assertEquals(pickDeclarationFile([file("EMPL2021_204470152_09.2025_1.TXT")], WANT_OBR1_SEP), null);
+  assertEquals(pickDeclarationFile([file("EMPL2021_100000002_09.2025_1.TXT")], WANT_OBR1_SEP), null);
 });
 
 Deno.test("pickDeclarationFile: само обр.6 е генериран → обр.1 НЕ се маркира", () => {
-  assertEquals(pickDeclarationFile([file("NRA62007_204470152_09.2026_1.TXT")], WANT_OBR1_SEP), null);
+  assertEquals(pickDeclarationFile([file("NRA62007_100000002_09.2026_1.TXT")], WANT_OBR1_SEP), null);
 });
 
 Deno.test("pickDeclarationFile: само обр.1 е генериран → обр.6 НЕ се маркира", () => {
   assertEquals(
-    pickDeclarationFile([file("EMPL2021_204470152_09.2026_1.TXT")], { ...WANT_OBR1_SEP, kind: "obr6" }),
+    pickDeclarationFile([file("EMPL2021_100000002_09.2026_1.TXT")], { ...WANT_OBR1_SEP, kind: "obr6" }),
     null,
   );
 });
@@ -323,7 +323,7 @@ Deno.test("pickDeclarationFile: само обр.1 е генериран → об
 Deno.test("pickDeclarationFile: ПАПКА с име като декларацията не се брои", () => {
   assertEquals(
     pickDeclarationFile(
-      [file("EMPL2021_204470152_09.2026_1.TXT", undefined, "application/vnd.google-apps.folder")],
+      [file("EMPL2021_100000002_09.2026_1.TXT", undefined, "application/vnd.google-apps.folder")],
       WANT_OBR1_SEP,
     ),
     null,
@@ -333,33 +333,33 @@ Deno.test("pickDeclarationFile: ПАПКА с име като деклараци
 Deno.test("pickDeclarationFile: PDF преглед до TXT-то — избира TXT-то", () => {
   const picked = pickDeclarationFile([
     file("Преглед на Декларация Обр. 6.pdf", "2026-10-01T00:00:00Z"),
-    file("EMPL2021_204470152_09.2026_1.TXT", "2026-10-19T10:00:00Z"),
+    file("EMPL2021_100000002_09.2026_1.TXT", "2026-10-19T10:00:00Z"),
   ], WANT_OBR1_SEP);
-  assertEquals(picked?.name, "EMPL2021_204470152_09.2026_1.TXT");
+  assertEquals(picked?.name, "EMPL2021_100000002_09.2026_1.TXT");
 });
 
 Deno.test("pickDeclarationFile: няколко копия (ТРЗ\\ + месечната папка, корекция) → най-ранното", () => {
   const picked = pickDeclarationFile([
-    file("EMPL2021_204470152_09.2026_5.TXT", "2026-10-19T12:00:00Z"),
-    file("EMPL2021_204470152_09.2026_1.TXT", "2026-10-15T08:00:00Z"),
-    file("EMPL2021_204470152_09.2026_1.TXT", "2026-10-16T08:00:00Z"),
+    file("EMPL2021_100000002_09.2026_5.TXT", "2026-10-19T12:00:00Z"),
+    file("EMPL2021_100000002_09.2026_1.TXT", "2026-10-15T08:00:00Z"),
+    file("EMPL2021_100000002_09.2026_1.TXT", "2026-10-16T08:00:00Z"),
   ], WANT_OBR1_SEP);
   assertEquals(picked?.modifiedTime, "2026-10-15T08:00:00Z");
 });
 
 Deno.test("pickDeclarationFile: файл без/с невалидна дата не чупи избора, отива последен", () => {
   const picked = pickDeclarationFile([
-    file("EMPL2021_204470152_09.2026_1.TXT", "не-е-дата"),
-    file("EMPL2021_204470152_09.2026_2.TXT"),
-    file("EMPL2021_204470152_09.2026_3.TXT", "2026-10-19T12:00:00Z"),
+    file("EMPL2021_100000002_09.2026_1.TXT", "не-е-дата"),
+    file("EMPL2021_100000002_09.2026_2.TXT"),
+    file("EMPL2021_100000002_09.2026_3.TXT", "2026-10-19T12:00:00Z"),
   ], WANT_OBR1_SEP);
-  assertEquals(picked?.name, "EMPL2021_204470152_09.2026_3.TXT");
+  assertEquals(picked?.name, "EMPL2021_100000002_09.2026_3.TXT");
 });
 
 Deno.test("pickDeclarationFile: само файлове без дата → все пак намира", () => {
   assertEquals(
-    pickDeclarationFile([file("EMPL2021_204470152_09.2026_1.TXT")], WANT_OBR1_SEP)?.name,
-    "EMPL2021_204470152_09.2026_1.TXT",
+    pickDeclarationFile([file("EMPL2021_100000002_09.2026_1.TXT")], WANT_OBR1_SEP)?.name,
+    "EMPL2021_100000002_09.2026_1.TXT",
   );
 });
 
@@ -406,7 +406,7 @@ Deno.test("DECLARATION_FILES: обр.1 ↔ EMPL, обр.6 ↔ NRA6, префик
   assertEquals(DECLARATION_FILES.obr6_monthly.kind, "obr6");
   for (const [code, d] of Object.entries(DECLARATION_FILES)) {
     for (const p of d.searchPrefixes) {
-      assertEquals(parseNapDeclarationFileName(`${p}_204470152_09.2026_1.TXT`)?.kind, d.kind, code);
+      assertEquals(parseNapDeclarationFileName(`${p}_100000002_09.2026_1.TXT`)?.kind, d.kind, code);
     }
   }
 });
@@ -421,29 +421,29 @@ Deno.test("EXCLUDED_FROM_FOLDER_HEURISTIC: декларациите и имей�
 // Реални имена от Firmi (28.10.2026), ID-тата са измислени.
 const FIRMI_TOP = [
   { id: "folder_gdm_grup_xx", name: "ДЖИ ДИ ЕМ ГРУП 2019" },
-  { id: "folder_korekt_prem", name: "КОРЕКТ ПРЕМЕСТВАНЕ  ООД" },
+  { id: "folder_korekt_prem", name: "ПРИМЕРНО ПРЕМЕСТВАНЕ  ООД" },
   { id: "folder_pentanoi_xx", name: "ПЕНТАНОИ ЕООД" },
   { id: "folder_screen_boxx", name: "СКРИЙН БОКС ООД" },
 ];
 
 Deno.test("resolveClientFolder: има drive_folder_id → ползва него, без да чака списъка с папки", () => {
   assertEquals(
-    resolveClientFolder({ name: "Петанои", drive_folder_id: "1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv" }, null),
-    { id: "1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv", name: "Петанои", source: "id" },
+    resolveClientFolder({ name: "Петанои", drive_folder_id: "1AbCdEfGhIjKlMnOpQrStUvWxYz012345" }, null),
+    { id: "1AbCdEfGhIjKlMnOpQrStUvWxYz012345", name: "Петанои", source: "id" },
   );
 });
 
 Deno.test("resolveClientFolder: ID-то печели пред съвпадение по име (ДЖИ ДИ ЕМ ГРУП ≠ ГРУП 2019)", () => {
-  const r = resolveClientFolder({ name: "ДЖИ ДИ ЕМ ГРУП", drive_folder_id: "1KTJpY5r9oYcGY0GSFEQpeIjTraq7dBWE" }, FIRMI_TOP);
-  assertEquals(r, { id: "1KTJpY5r9oYcGY0GSFEQpeIjTraq7dBWE", name: "ДЖИ ДИ ЕМ ГРУП", source: "id" });
+  const r = resolveClientFolder({ name: "ДЖИ ДИ ЕМ ГРУП", drive_folder_id: "1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654" }, FIRMI_TOP);
+  assertEquals(r, { id: "1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654", name: "ДЖИ ДИ ЕМ ГРУП", source: "id" });
 });
 
-Deno.test("resolveClientFolder: ID-то намира папки, които името пропуска (Корект Преместване ЕООД, Петанои)", () => {
+Deno.test("resolveClientFolder: ID-то намира папки, които името пропуска (Примерно Преместване ЕООД, Петанои)", () => {
   // Без ID — по име не се намират:
-  assertEquals(resolveClientFolder({ name: "Корект Преместване ЕООД", drive_folder_id: null }, FIRMI_TOP), null);
+  assertEquals(resolveClientFolder({ name: "Примерно Преместване ЕООД", drive_folder_id: null }, FIRMI_TOP), null);
   assertEquals(resolveClientFolder({ name: "Петанои", drive_folder_id: null }, FIRMI_TOP), null);
   // С ID — намират се:
-  const r = resolveClientFolder({ name: "Корект Преместване ЕООД", drive_folder_id: "1wS76AXZ01VhN1LBR1sU9Ngjfo_pGj1zg" }, FIRMI_TOP);
+  const r = resolveClientFolder({ name: "Примерно Преместване ЕООД", drive_folder_id: "1QwErTyUiOpAsDfGhJkLzXcVbNm_12345" }, FIRMI_TOP);
   assertEquals(r !== null && r !== "needsTopFolders" ? r.source : null, "id");
 });
 
@@ -468,15 +468,38 @@ Deno.test("resolveClientFolder: невалидно drive_folder_id → null, Н�
 // ---------- isValidDriveFolderId() ----------
 
 Deno.test("isValidDriveFolderId: реални ID-та от Firmi минават", () => {
-  assert(isValidDriveFolderId("1--p_IUaWhqLZYeYo4nWTwhrIoZq3EnqN"));
-  assert(isValidDriveFolderId("1_AHAKUSOxLqC8b8KfUmpnczhv_Z02skb"));
+  assert(isValidDriveFolderId("1--p_FakeIdForTestsOnly000000ABC"));
+  assert(isValidDriveFolderId("1_FakeIdForTestsOnly00000000XYZ"));
 });
 
 Deno.test("isValidDriveFolderId: кавички, интервали, URL и празно се отхвърлят", () => {
   assert(!isValidDriveFolderId("abc' in parents or '"));
-  assert(!isValidDriveFolderId("https://drive.google.com/drive/folders/1sj4gMIT3Xq57uup3qjE6Guh6yUdheofv"));
+  assert(!isValidDriveFolderId("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345"));
   assert(!isValidDriveFolderId("1sj4gMIT3Xq 57uup3qj"));
   assert(!isValidDriveFolderId(""));
   assert(!isValidDriveFolderId(null));
   assert(!isValidDriveFolderId(undefined));
+});
+// ---------- ЕСТИ: проверка от 1-во число и файл в подпапка ЕСТИ ----------
+import { estiCheckAllowed, pickEstiFile } from "./index.ts";
+
+Deno.test("estiCheckAllowed: за 2026-10 не преди 01.11, от 01.11 да", () => {
+  assertEquals(estiCheckAllowed({ year: 2026, month: 10 }, new Date("2026-10-31T23:00:00Z")), false);
+  assertEquals(estiCheckAllowed({ year: 2026, month: 10 }, new Date("2026-11-01T00:00:00Z")), true);
+});
+
+Deno.test("estiCheckAllowed: декември → 01.01 на следващата година", () => {
+  assertEquals(estiCheckAllowed({ year: 2026, month: 12 }, new Date("2026-12-31T00:00:00Z")), false);
+  assertEquals(estiCheckAllowed({ year: 2026, month: 12 }, new Date("2027-01-01T00:00:00Z")), true);
+});
+
+Deno.test("pickEstiFile: празна папка или само подпапки → null", () => {
+  assertEquals(pickEstiFile([]), null);
+  assertEquals(pickEstiFile([{ id: "1", name: "x", mimeType: "application/vnd.google-apps.folder" }]), null);
+});
+
+Deno.test("pickEstiFile: взема най-ранния файл", () => {
+  const a = { id: "1", name: "a.pdf", mimeType: "application/pdf", modifiedTime: "2026-11-03T10:00:00Z" };
+  const b = { id: "2", name: "b.pdf", mimeType: "application/pdf", modifiedTime: "2026-11-02T10:00:00Z" };
+  assertEquals(pickEstiFile([a, b])?.id, "2");
 });

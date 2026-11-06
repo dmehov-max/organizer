@@ -1,0 +1,46 @@
+# Тестове при всеки push и pull request — нищо не се качва, ако не минат.
+# Какво се проверява (виж README.md → „Тестове“):
+#   1. типовете на всички Edge Functions (deno check)
+#   2. unit тестовете на функциите (deno test)
+#   3. хигиена на репото — без клиентски данни и тайни (hygiene.test.ts)
+#   4. жива проверка на сигурността срещу production само с публичния
+#      ключ — без вход нищо не се чете/пише (live_security.test.ts)
+#   5. синтаксис на скриптовете в index.html / upload.html / confirm.html
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Типове на Edge Functions
+        run: deno check supabase/functions/*/index.ts
+
+      - name: Unit тестове на функциите
+        run: deno test --allow-net --allow-env supabase/functions/
+
+      - name: Хигиена на репото (без клиентски данни и тайни)
+        run: deno test --allow-read --allow-run=git supabase/tests/hygiene.test.ts
+
+      - name: Жива проверка на сигурността (само публичен ключ)
+        run: deno test --allow-net --allow-env --allow-read supabase/tests/live_security.test.ts
+
+      - name: Синтаксис на страниците
+        run: |
+          for f in index.html upload.html confirm.html; do
+            awk '/<script( type="module")?>/{f=1;next} /<\/script>/{if(f){f=0}} f' "$f" > "/tmp/$f.mjs"
+            node --check "/tmp/$f.mjs" && echo "$f OK"
+          done

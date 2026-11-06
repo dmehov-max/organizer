@@ -128,8 +128,8 @@ export type ClientFolder = { id: string; name: string; source: "id" | "name" };
 
 /** Папката на фирмата в Firmi (0073, поискано изрично 2026-10-28):
  * ако clients.drive_folder_id е попълнено — САМО то, без да гледаме
- * имената (засичането по име грешеше: "ДЖИ ДИ ЕМ ГРУП" хващаше
- * "ДЖИ ДИ ЕМ ГРУП 2019", а "Петанои" не намираше "ПЕНТАНОИ ЕООД").
+ * имената (засичането по име грешеше: "ПРИМЕР ГРУП" хващаше
+ * "ПРИМЕР ГРУП 2019", а "Примернои" не намираше "ПРИМЕРНОИ ЕООД").
  * Иначе — резервно по име измежду topFolders (папките директно под
  * Firmi). topFolders е null, докато не са изтеглени; връщаме
  * "needsTopFolders", за да не викаме Drive излишно, когато има ID.
@@ -176,7 +176,7 @@ export function parseYearMonth(periodLabel: string): { year: number; month: numb
  * суровия DEKLAR.txt (позиционен формат за подаване към НАП, БЕЗ
  * надписи на полетата — официалната спецификация не е налична тук).
  * Позициите на кл.20/40/50/60/71 по-долу са изведени ЕМПИРИЧНО от
- * реален файл (СКРИЙН БОКС ООД, 07.2026), не от документация —
+ * реален файл (една фирма, 07.2026), не от документация —
  * затова НИКОГА не връщаме число, преди да са минали ДВЕ независими
  * аритметични проверки:
  *   1. кл.50 (или кл.60) трябва да съвпада с изчисленото кл.20−кл.40
@@ -301,6 +301,31 @@ export function pickEstiFile(files: DriveFile[]): DriveFile | null {
   return [...only].sort((a, b) => time(a) - time(b))[0];
 }
 
+/** ЕСТИ: справката се сваля от системата на ЕСТИ СЛЕД като е подадена
+ * (потвърдено от потребителя 06.11.2026: „вече е и подадена, след като
+ * е създадена и я има във файла“). Затова файлът в подпапката ЕСТИ
+ * отмята и трите стъпки — Създаване, Проверка, Подаване — с датата на
+ * файла. Ръчно сложена отметка не се пипа (пази се нейната дата).
+ * Статусът на задачата не се променя (както при ръчното отмятане). */
+export function buildEstiUpdate(
+  task: { stage_creation_done?: boolean | null; stage_review_done?: boolean | null; stage_submission_done?: boolean | null },
+  file: DriveFile,
+  nowIso: string,
+): Record<string, unknown> {
+  const payload = buildDeclarationUpdate(task, file, nowIso);
+  const t = file.modifiedTime ? Date.parse(file.modifiedTime) : NaN;
+  const at = !Number.isNaN(t) && t <= Date.parse(nowIso) ? new Date(t).toISOString() : nowIso;
+  if (!task.stage_review_done) {
+    payload.stage_review_done = true;
+    payload.stage_review_done_at = at;
+  }
+  if (!task.stage_submission_done) {
+    payload.stage_submission_done = true;
+    payload.stage_submission_done_at = at;
+  }
+  return payload;
+}
+
 /** От резултатите на търсенето избира файла, който ТОЧНО отговаря на
  * задачата (вид + ЕИК + месец + година) — Drive "contains" може да
  * върне и повече, напр. ЕИК, който е префикс на 13-цифрен ЕИК на клон.
@@ -414,7 +439,7 @@ async function handler(req: Request): Promise<Response> {
     const { data: tasks, error: tasksErr } = await supabase
       .from("tasks")
       .select(
-        "id, period_label, client_id, stage_creation_done, clients ( name, eik_egn, drive_folder_id ), obligation_types ( code )",
+        "id, period_label, client_id, stage_creation_done, stage_review_done, stage_submission_done, clients ( name, eik_egn, drive_folder_id ), obligation_types ( code )",
       )
       .is("files_generated_detected_at", null)
       .eq("not_applicable", false)
@@ -422,14 +447,14 @@ async function handler(req: Request): Promise<Response> {
     if (tasksErr) throw tasksErr;
 
     // ЕСТИ задачи, засечени по стария груб метод (папката не е празна), но
-    // още без отметка "Създаване" — проверяваме ги пак в подпапка ЕСТИ.
+    // още без отметка "Подаване" — проверяваме ги пак в подпапка ЕСТИ.
     const { data: estiTasks, error: estiTasksErr } = await supabase
       .from("tasks")
       .select(
-        "id, period_label, client_id, stage_creation_done, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
+        "id, period_label, client_id, stage_creation_done, stage_review_done, stage_submission_done, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
       )
       .not("files_generated_detected_at", "is", null)
-      .eq("stage_creation_done", false)
+      .eq("stage_submission_done", false)
       .eq("not_applicable", false)
       .neq("status", "completed")
       .eq("obligation_types.code", "esti_monthly_report");
@@ -523,7 +548,7 @@ async function handler(req: Request): Promise<Response> {
 
         // Резервен път: [Фирма]/ДДС/[ММ.Година]/ — ДДС има собствена
         // папка на ниво фирма при някои клиенти, отделно от годишното
-        // дърво (наблюдавано на живо: СКРИЙН БОКС ООД/ДДС/07.2026/,
+        // дърво (наблюдавано на живо: <фирма>/ДДС/07.2026/,
         // с DEKLAR.txt/POKUPKI.txt/PRODAGBI.txt — реалните ДДС експорти).
         if (!monthFolder) {
           const ddsFolder = await findChildFolder(accessToken, clientFolder.id, "ДДС");
@@ -537,7 +562,8 @@ async function handler(req: Request): Promise<Response> {
         if (!monthFolder) continue;
 
         // ЕСТИ: само подпапка ЕСТИ/ESTI, само от 1-во число на следващия
-        // месец; качен файл → отметка "Създаване" (като при обр.1/обр.6).
+        // месец; файлът се сваля след подаване → и трите отметки
+        // (виж buildEstiUpdate).
         if (code === "esti_monthly_report") {
           if (!estiCheckAllowed(ym, new Date(nowIso))) continue;
           let estiFolder: { id: string; name: string } | null = null;
@@ -548,7 +574,7 @@ async function handler(req: Request): Promise<Response> {
           if (!estiFolder) continue; // папката още не е създадена от счетоводителя
           const estiFile = pickEstiFile(await driveListChildren(accessToken, estiFolder.id));
           if (!estiFile) continue;
-          const payload = buildDeclarationUpdate(task, estiFile, nowIso);
+          const payload = buildEstiUpdate(task, estiFile, nowIso);
           payload.files_generated_detected_path = `${pathPrefix}/${monthFolder.name}/${estiFolder.name}/${estiFile.name}`;
           const { error: estiErr } = await supabase.from("tasks").update(payload).eq("id", task.id);
           if (estiErr) throw estiErr;

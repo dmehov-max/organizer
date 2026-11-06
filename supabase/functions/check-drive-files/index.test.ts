@@ -6,6 +6,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import {
   base64url,
   buildDeclarationUpdate,
+  buildEstiUpdate,
   candidateMonthFolderNames,
   DECLARATION_FILES,
   declarationSearchQuery,
@@ -361,6 +362,43 @@ Deno.test("pickDeclarationFile: само файлове без дата → вс
     pickDeclarationFile([file("EMPL2021_100000002_09.2026_1.TXT")], WANT_OBR1_SEP)?.name,
     "EMPL2021_100000002_09.2026_1.TXT",
   );
+});
+
+// ---------- buildEstiUpdate() — файлът в ЕСТИ = създадена И подадена ----------
+
+Deno.test("buildEstiUpdate: празна задача → Създаване, Проверка и Подаване с датата на файла", () => {
+  const u = buildEstiUpdate({}, file("ActiveReports (4).PDF", "2026-11-03T08:47:00Z"), "2026-11-06T09:00:00.000Z");
+  for (const k of ["stage_creation_done", "stage_review_done", "stage_submission_done"]) assertEquals(u[k], true, k);
+  for (const k of ["stage_creation_done_at", "stage_review_done_at", "stage_submission_done_at"]) {
+    assertEquals(u[k], "2026-11-03T08:47:00.000Z", k);
+  }
+});
+
+Deno.test("buildEstiUpdate: ръчно отметнато Създаване остава с неговата дата, другите две се слагат", () => {
+  const u = buildEstiUpdate({ stage_creation_done: true }, file("x.pdf", "2026-11-03T08:47:00Z"), "2026-11-06T09:00:00.000Z");
+  assertEquals("stage_creation_done" in u, false);
+  assertEquals("stage_creation_done_at" in u, false);
+  assertEquals(u.stage_review_done, true);
+  assertEquals(u.stage_submission_done, true);
+});
+
+Deno.test("buildEstiUpdate: вече подадена → само files_generated_* , нищо друго", () => {
+  const u = buildEstiUpdate(
+    { stage_creation_done: true, stage_review_done: true, stage_submission_done: true },
+    file("x.pdf", "2026-11-03T08:47:00Z"), "2026-11-06T09:00:00.000Z",
+  );
+  assertEquals(Object.keys(u).sort(), ["files_generated_detected_at", "files_generated_detected_path"]);
+});
+
+Deno.test("buildEstiUpdate: НИКОГА не пипа статуса, номера или 'Прието'", () => {
+  const u = buildEstiUpdate({}, file("x.pdf", "2026-11-03T08:47:00Z"), "2026-11-06T09:00:00.000Z");
+  for (const k of ["status", "submission_reference_number", "completed_at", "confirmation_status"]) assertEquals(k in u, false, k);
+});
+
+Deno.test("buildEstiUpdate: дата в бъдещето/липсваща → 'сега' и за трите", () => {
+  const u = buildEstiUpdate({}, file("x.pdf"), "2026-11-06T09:00:00.000Z");
+  assertEquals(u.stage_submission_done_at, "2026-11-06T09:00:00.000Z");
+  assertEquals(u.stage_review_done_at, "2026-11-06T09:00:00.000Z");
 });
 
 // ---------- buildDeclarationUpdate() ----------

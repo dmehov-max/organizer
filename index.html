@@ -554,9 +554,9 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>№</th><th>Фирма</th><th>Файл</th><th>Бележка от клиента</th><th>Получен</th><th>Статус</th><th>Забележка</th><th></th>
+            <th>№</th><th>Фирма</th><th>Файл</th><th>Бележка от клиента</th><th>Получен</th><th>Controlisy</th><th>Статус</th><th>Забележка</th><th></th>
           </tr></thead>
-          <tbody id="incoming-body"><tr><td colspan="8" class="loading">Зареждане…</td></tr></tbody>
+          <tbody id="incoming-body"><tr><td colspan="9" class="loading">Зареждане…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -837,6 +837,14 @@
             <button type="button" id="open-drive-folder-btn" class="small" style="display:none">Папка в Drive</button>
           </div>
           <div class="form-row" style="align-items:start;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+            <label style="margin-top:8px">Controlisy</label>
+            <div>
+              <input id="ec-controlisy-purchases" placeholder="Покупки — docs+…@controlisy.bg" style="width:100%;margin-bottom:6px" />
+              <input id="ec-controlisy-sales" placeholder="Продажби — docs+…@controlisy.bg" style="width:100%" />
+              <div class="hint" style="margin-top:3px;font-size:.74rem;line-height:1.3" title="Адресът „имейл към папка“ от Controlisy (Специални разрешения за папката → Получаване по имейл). Качен от клиента документ се праща там автоматично.">Качените от клиента документи се препращат там автоматично.</div>
+            </div>
+          </div>
+          <div class="form-row" style="align-items:start;margin-top:10px">
             <label for="ec-contact-emails" style="margin-top:8px">Имейли</label>
             <div>
               <textarea id="ec-contact-emails" rows="2" placeholder="По един на ред" style="font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical;width:100%"></textarea>
@@ -3209,7 +3217,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations, drive_folder_url").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations, drive_folder_url, controlisy_purchases_email, controlisy_sales_email").eq("id", clientId).single();
 
   // Линк за клиента да качва документи сам (upload.html?t=<upload_token>,
   // без логин от негова страна) — виж миграция 0059. Копира в клипборда,
@@ -3302,6 +3310,8 @@ async function toggleClientSettings(tr) {
   document.getElementById("ec-street").value = clientRow?.address_street ?? "";
   document.getElementById("ec-notes").value = clientRow?.notes ?? "";
   document.getElementById("ec-contact-emails").value = (clientRow?.contact_emails ?? []).join("\n");
+  document.getElementById("ec-controlisy-purchases").value = clientRow?.controlisy_purchases_email ?? "";
+  document.getElementById("ec-controlisy-sales").value = clientRow?.controlisy_sales_email ?? "";
   document.getElementById("ec-tasks-start").value = clientRow?.tasks_start_date ?? "";
   currentEditClientType = clientRow?.type ?? "legal_entity";
   updateEcEikHint();
@@ -3324,8 +3334,17 @@ async function toggleClientSettings(tr) {
       .split("\n").map((s) => s.trim()).filter(Boolean);
     if (!name || !eik) { showBanner("Име и ЕИК/ЕГН са задължителни — не е записано."); return; }
     if (!updateEcEikHint()) { showBanner(`${currentEditClientType === "individual" ? "ЕГН" : "ЕИК"} трябва да е точно ${eikExpectedLength(currentEditClientType)} цифри — не е записано.`); return; }
+    // Адресите в Controlisy (0079) — само @controlisy.bg, за да не
+    // тръгнат документи на клиент към случаен адрес при печатна грешка.
+    const controlisyPurchases = document.getElementById("ec-controlisy-purchases").value.trim();
+    const controlisySales = document.getElementById("ec-controlisy-sales").value.trim();
+    for (const addr of [controlisyPurchases, controlisySales]) {
+      if (addr && !/^[A-Za-z0-9._+-]+@controlisy\.(bg|com)$/i.test(addr)) {
+        showBanner(`„${addr}“ не е адрес @controlisy.bg — не е записано.`); return;
+      }
+    }
     const { error } = await supabase.from("clients")
-      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, notes: notes || null, contact_emails: contactEmails, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
+      .update({ name, eik_egn: eik, address_city: city || null, address_street: street || null, notes: notes || null, contact_emails: contactEmails, controlisy_purchases_email: controlisyPurchases || null, controlisy_sales_email: controlisySales || null, ...(tasksStart ? { tasks_start_date: tasksStart } : {}) }).eq("id", clientId);
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
@@ -3340,7 +3359,7 @@ async function toggleClientSettings(tr) {
   // всяко отваряне (и щеше да пише в СТАРИЯ clientId при следващо
   // blur). Присвояването сменя предишния, само последният важи —
   // същият похват, ползван по-долу за vatCb.onchange/activeCb.onchange.
-  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start", "ec-notes", "ec-contact-emails"].forEach((id) => {
+  ["ec-name", "ec-eik", "ec-city", "ec-street", "ec-tasks-start", "ec-notes", "ec-contact-emails", "ec-controlisy-purchases", "ec-controlisy-sales"].forEach((id) => {
     document.getElementById(id).onblur = saveCompanyData;
   });
 
@@ -4212,16 +4231,28 @@ async function refreshIncomingBadge() {
 
 async function loadIncomingDocuments() {
   const body = document.getElementById("incoming-body");
-  body.innerHTML = `<tr><td colspan="8" class="loading">Зареждане…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="9" class="loading">Зареждане…</td></tr>`;
 
   const statusFilter = document.getElementById("incoming-status-filter").value;
   let query = supabase.from("incoming_documents")
-    .select("id, original_filename, storage_path, note, staff_note, status, received_at, source, source_url, clients(name)")
+    .select("id, original_filename, storage_path, note, staff_note, status, received_at, source, source_url, kind, forwarded_at, forwarded_to, forward_error, clients(name, controlisy_purchases_email, controlisy_sales_email)")
     .order("received_at", { ascending: false });
   if (statusFilter) query = query.eq("status", statusFilter);
   const { data, error } = await query;
-  if (error) { body.innerHTML = `<tr><td colspan="8" class="empty">Грешка: ${error.message}</td></tr>`; return; }
-  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="8" class="empty">Няма документи по този филтър.</td></tr>`; return; }
+  if (error) { body.innerHTML = `<tr><td colspan="9" class="empty">Грешка: ${error.message}</td></tr>`; return; }
+  if (!data || data.length === 0) { body.innerHTML = `<tr><td colspan="9" class="empty">Няма документи по този филтър.</td></tr>`; return; }
+
+  // Колона Controlisy (0079): пратено кога/къде, грешка с „Прати пак“,
+  // или тире, ако фирмата няма адрес там / файлът не е при нас.
+  const controlisyCell = (d) => {
+    const hasAddress = !!(d.clients?.controlisy_purchases_email || d.clients?.controlisy_sales_email);
+    const kindLabel = d.kind === "sale" ? "Продажби" : d.kind === "purchase" ? "Покупки" : "";
+    if (d.forwarded_at) {
+      return `<td><span class="pill pill-completed" title="${escapeHtml(d.forwarded_to ?? "")}">✓ ${kindLabel || "пратено"}</span><div class="ref-mini">${formatDateBg(d.forwarded_at.slice(0, 10))}</div></td>`;
+    }
+    if (!d.storage_path || !hasAddress) return `<td style="color:var(--muted)">—</td>`;
+    return `<td>${d.forward_error ? `<span class="pill pill-rejected" title="${escapeHtml(d.forward_error)}">грешка</span> ` : ""}<button class="small incoming-forward-btn" data-id="${d.id}">Прати${d.forward_error ? " пак" : ""}</button></td>`;
+  };
 
   // Два източника (0060): 'client_upload' — файлът е в нашия Storage,
   // кликът показва signed URL; 'email_detected' — само лог от ръчна
@@ -4236,11 +4267,33 @@ async function loadIncomingDocuments() {
         : `<a class="linklike incoming-view-btn" data-path="${escapeHtml(d.storage_path)}">${escapeHtml(d.original_filename)}</a>`}</td>
       <td>${d.note ? escapeHtml(d.note) : "<span style=\"color:var(--muted)\">—</span>"}</td>
       <td>${formatDateBg(d.received_at)}</td>
+      ${controlisyCell(d)}
       <td><span class="pill pill-${d.status === "done" ? "completed" : "waiting"}">${d.status === "done" ? "Обработен" : "Нов"}</span></td>
       ${noteCellHtml(d.staff_note, `data-id="${d.id}"`)}
       <td><button class="small incoming-toggle-btn" data-id="${d.id}" data-status="${d.status}">${d.status === "done" ? "Отвори пак" : "Обработен"}</button></td>
     </tr>
   `).join("");
+
+  body.querySelectorAll(".incoming-forward-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Праща…";
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/forward-to-controlisy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+          body: JSON.stringify({ document_id: btn.dataset.id }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok || !out.ok) showBanner("Controlisy: " + (out.error ?? `HTTP ${res.status}`));
+        else showBanner(`Пратено към Controlisy (${out.forwarded_to}).`, "ok");
+      } catch (e) {
+        showBanner("Controlisy: " + String(e));
+      }
+      loadIncomingDocuments();
+    });
+  });
 
   body.querySelectorAll(".incoming-view-btn").forEach((a) => {
     a.addEventListener("click", async () => {

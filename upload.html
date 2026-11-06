@@ -143,9 +143,11 @@ if (!token) {
 
 async function init() {
   let clientName;
+  let askKind = false; // фирмата има и Покупки, и Продажби в Controlisy (0079)
   try {
     const data = await callUpload({ token });
     clientName = data.client_name;
+    askKind = data.ask_kind === true;
   } catch (e) {
     content.innerHTML = `<div class="msg err">${escapeHtml(e.message)}</div>`;
     return;
@@ -167,6 +169,11 @@ async function init() {
       <input type="file" id="file-input" multiple />
     </div>
     <ul id="file-list"></ul>
+    ${askKind ? `
+    <div id="kind-row" style="display:flex;gap:16px;margin:4px 0 10px;font-size:.9rem">
+      <label><input type="radio" name="kind" value="purchase" checked /> Покупки (разходи)</label>
+      <label><input type="radio" name="kind" value="sale" /> Продажби (приходи)</label>
+    </div>` : ""}
     <textarea id="note" placeholder="Бележка към документа (по избор) — напр. за кой месец е"></textarea>
     <button class="primary" id="send-btn" disabled>Изпрати документ(и)</button>
     <div id="result"></div>
@@ -274,13 +281,14 @@ async function init() {
     sendBtn.disabled = true;
     sendBtn.textContent = "Изпращане…";
     const note = document.getElementById("note").value.trim();
+    const kind = document.querySelector('input[name="kind"]:checked')?.value;
     let okCount = 0;
 
     for (const q of queued) {
       if (q.status !== "чака") continue;
       try {
         const base64 = await fileToBase64(q.file);
-        await callUpload({ token, filename: q.file.name, file_base64: base64, note: note || undefined });
+        await callUpload({ token, filename: q.file.name, file_base64: base64, note: note || undefined, kind });
         q.status = "готово";
         okCount++;
       } catch (e) {

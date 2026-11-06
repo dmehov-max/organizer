@@ -73,25 +73,34 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const { token, filename, file_base64, note, source_url } = await req.json();
+    const { token, filename, file_base64, note, source_url, kind } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Липсва линк-токен." }), { status: 400, headers: corsHeaders });
     }
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: client, error: clientErr } = await admin
-      .from("clients").select("id, name").eq("upload_token", token).maybeSingle();
+      .from("clients").select("id, name, controlisy_purchases_email, controlisy_sales_email").eq("upload_token", token).maybeSingle();
     if (clientErr || !client) {
       return new Response(JSON.stringify({ error: "Този линк не е валиден. Свържете се с Мехов Консулт за нов линк." }), { status: 404, headers: corsHeaders });
     }
 
+    // Кои видове документи има смисъл клиентът да избира (0079): само
+    // ако фирмата има И двете папки в Controlisy. С една папка всичко
+    // отива там и не го питаме.
+    const kinds: string[] = [];
+    if (client.controlisy_purchases_email) kinds.push("purchase");
+    if (client.controlisy_sales_email) kinds.push("sale");
+    const askKind = kinds.length === 2;
+
     // Режим "само проверка на линка" — upload.html го вика при
     // зареждане, за да поздрави клиента с името на фирмата.
     if (!file_base64 && !source_url) {
-      return new Response(JSON.stringify({ ok: true, client_name: client.name }), {
+      return new Response(JSON.stringify({ ok: true, client_name: client.name, ask_kind: askKind }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const docKind = kind === "purchase" || kind === "sale" ? kind : null;
 
     // Режим "засечено по имейл" (0060) — само лог, файлът остава в
     // Gmail, счетоводителят го отваря през source_url. Проверено
@@ -134,12 +143,13 @@ async function handler(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ error: "Качването се провали: " + upErr.message }), { status: 500, headers: corsHeaders });
     }
 
-    const { error: insErr } = await admin.from("incoming_documents").insert({
+    const { data: inserted, error: insErr } = await admin.from("incoming_documents").insert({
       client_id: client.id,
       original_filename: filename,
       storage_path: path,
       note: note || null,
-    });
+      kind: docKind,
+    }).select("id").single();
     if (insErr) {
       // Файлът вече е в bucket-а, но опашката не знае за него — по-безопасно
       // да оставим "сирачето" в Storage (admin може да го намери ръчно през
@@ -148,7 +158,24 @@ async function handler(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ error: "Файлът се качи, но записът се провали: " + insErr.message }), { status: 500, headers: corsHeaders });
     }
 
-    return new Response(JSON.stringify({ ok: true, client_name: client.name }), {
+    // Препращане към Controlisy (0079) — само ако фирмата има адрес там.
+    // Грешка тук НЕ проваля качването: файлът е при нас, грешката се
+    // записва в forward_error и таблото показва „Прати пак“.
+    let forwarded = false;
+    if (kinds.length > 0) {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/forward-to-controlisy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-secret": SUPABASE_SERVICE_ROLE_KEY },
+          body: JSON.stringify({ document_id: inserted.id }),
+        });
+        forwarded = res.ok;
+      } catch (e) {
+        await admin.from("incoming_documents").update({ forward_error: `Препращане: ${String(e)}` }).eq("id", inserted.id);
+      }
+    }
+
+    return new Response(JSON.stringify({ ok: true, client_name: client.name, forwarded }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

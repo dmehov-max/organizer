@@ -143,11 +143,15 @@ if (!token) {
 
 async function init() {
   let clientName;
-  let askKind = false; // фирмата има и Покупки, и Продажби в Controlisy (0079)
+  let askKind = false; // фирмата има повече от една папка в Controlisy (0079/0081)
+  let kinds = [];      // 'purchase' | 'sale' | 'bank'
+  let banks = [];      // етикети на банковите папки
   try {
     const data = await callUpload({ token });
     clientName = data.client_name;
     askKind = data.ask_kind === true;
+    kinds = Array.isArray(data.kinds) ? data.kinds : [];
+    banks = Array.isArray(data.banks) ? data.banks : [];
   } catch (e) {
     content.innerHTML = `<div class="msg err">${escapeHtml(e.message)}</div>`;
     return;
@@ -170,9 +174,13 @@ async function init() {
     </div>
     <ul id="file-list"></ul>
     ${askKind ? `
-    <div id="kind-row" style="display:flex;gap:16px;margin:4px 0 10px;font-size:.9rem">
-      <label><input type="radio" name="kind" value="purchase" checked /> Покупки (разходи)</label>
-      <label><input type="radio" name="kind" value="sale" /> Продажби (приходи)</label>
+    <div id="kind-row" style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 10px;font-size:.9rem">
+      ${kinds.includes("purchase") ? `<label><input type="radio" name="kind" value="purchase" checked /> Покупки (разходи)</label>` : ""}
+      ${kinds.includes("sale") ? `<label><input type="radio" name="kind" value="sale" ${!kinds.includes("purchase") ? "checked" : ""} /> Продажби (приходи)</label>` : ""}
+      ${kinds.includes("bank") ? `<label><input type="radio" name="kind" value="bank" ${kinds.length === 1 ? "checked" : ""} /> Банково извлечение</label>` : ""}
+      ${banks.length > 1 ? `<select id="bank-label" style="font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)">
+        ${banks.map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("")}
+      </select>` : ""}
     </div>` : ""}
     <textarea id="note" placeholder="Бележка към документа (по избор) — напр. за кой месец е"></textarea>
     <button class="primary" id="send-btn" disabled>Изпрати документ(и)</button>
@@ -282,13 +290,14 @@ async function init() {
     sendBtn.textContent = "Изпращане…";
     const note = document.getElementById("note").value.trim();
     const kind = document.querySelector('input[name="kind"]:checked')?.value;
+    const bank_label = kind === "bank" ? (document.getElementById("bank-label")?.value ?? banks[0]) : undefined;
     let okCount = 0;
 
     for (const q of queued) {
       if (q.status !== "чака") continue;
       try {
         const base64 = await fileToBase64(q.file);
-        await callUpload({ token, filename: q.file.name, file_base64: base64, note: note || undefined, kind });
+        await callUpload({ token, filename: q.file.name, file_base64: base64, note: note || undefined, kind, bank_label });
         q.status = "готово";
         okCount++;
       } catch (e) {

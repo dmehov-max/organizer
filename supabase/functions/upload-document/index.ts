@@ -73,34 +73,42 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const { token, filename, file_base64, note, source_url, kind } = await req.json();
+    const { token, filename, file_base64, note, source_url, kind, bank_label } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Липсва линк-токен." }), { status: 400, headers: corsHeaders });
     }
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: client, error: clientErr } = await admin
-      .from("clients").select("id, name, controlisy_purchases_email, controlisy_sales_email").eq("upload_token", token).maybeSingle();
+      .from("clients").select("id, name, controlisy_purchases_email, controlisy_sales_email, controlisy_bank_folders").eq("upload_token", token).maybeSingle();
     if (clientErr || !client) {
       return new Response(JSON.stringify({ error: "Този линк не е валиден. Свържете се с Мехов Консулт за нов линк." }), { status: 404, headers: corsHeaders });
     }
 
-    // Кои видове документи има смисъл клиентът да избира (0079): само
-    // ако фирмата има И двете папки в Controlisy. С една папка всичко
-    // отива там и не го питаме.
+    // Кои видове документи има смисъл клиентът да избира (0079/0081):
+    // само ако фирмата има повече от една папка в Controlisy. С една
+    // папка всичко отива там и не го питаме. Банки: списък с етикети,
+    // клиентът избира коя, ако са няколко.
+    const banks = (Array.isArray(client.controlisy_bank_folders) ? client.controlisy_bank_folders : [])
+      .filter((b: any) => b && typeof b.email === "string" && b.email)
+      .map((b: any) => String(b.label ?? "").trim());
     const kinds: string[] = [];
     if (client.controlisy_purchases_email) kinds.push("purchase");
     if (client.controlisy_sales_email) kinds.push("sale");
-    const askKind = kinds.length === 2;
+    if (banks.length > 0) kinds.push("bank");
+    const askKind = kinds.length + Math.max(0, banks.length - 1) > 1;
 
     // Режим "само проверка на линка" — upload.html го вика при
     // зареждане, за да поздрави клиента с името на фирмата.
     if (!file_base64 && !source_url) {
-      return new Response(JSON.stringify({ ok: true, client_name: client.name, ask_kind: askKind }), {
+      return new Response(JSON.stringify({ ok: true, client_name: client.name, ask_kind: askKind, kinds, banks }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const docKind = kind === "purchase" || kind === "sale" ? kind : null;
+    const docKind = kind === "purchase" || kind === "sale" || kind === "bank" ? kind : null;
+    const docBankLabel = docKind === "bank" && typeof bank_label === "string" && banks.includes(bank_label.trim())
+      ? bank_label.trim()
+      : null;
 
     // Режим "засечено по имейл" (0060) — само лог, файлът остава в
     // Gmail, счетоводителят го отваря през source_url. Проверено
@@ -149,6 +157,7 @@ async function handler(req: Request): Promise<Response> {
       storage_path: path,
       note: note || null,
       kind: docKind,
+      bank_label: docBankLabel,
     }).select("id").single();
     if (insErr) {
       // Файлът вече е в bucket-а, но опашката не знае за него — по-безопасно

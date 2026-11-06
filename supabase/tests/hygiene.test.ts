@@ -18,7 +18,7 @@ const ALLOWED_EIKS = new Set([
 
 // Измислените ЕИК-та в тестовете: 1000000NN или една и съща цифра
 // 9 пъти (111111111) — виж supabase/private/README.md.
-const FAKE_EIK = /^10000000\d$|^100000010$|^(\d)\1{8}$|^123456789$/;
+const FAKE_EIK = /^1000000\d\d$|^(\d)\1{8}$|^123456789$/;
 
 const TEXT_EXT = new Set([".ts", ".js", ".sql", ".md", ".html", ".json", ".yml", ".yaml", ".txt", ".csv"]);
 const SKIP_DIRS = new Set([".git", "node_modules", "supabase/private", ".claude", "dist"]);

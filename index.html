@@ -4266,7 +4266,7 @@ async function loadIncomingDocuments() {
         ? `<a class="linklike" href="${escapeHtml(d.source_url)}" target="_blank" rel="noopener">✉️ ${escapeHtml(d.original_filename)}</a>`
         : `<a class="linklike incoming-view-btn" data-path="${escapeHtml(d.storage_path)}">${escapeHtml(d.original_filename)}</a>`}</td>
       <td>${d.note ? escapeHtml(d.note) : "<span style=\"color:var(--muted)\">—</span>"}</td>
-      <td>${formatDateBg(d.received_at)}</td>
+      <td title="${escapeHtml(d.received_at)}">${formatDateBg(d.received_at.slice(0, 10))} <span class="ref-mini" style="display:inline">${d.received_at.slice(11, 16)}</span></td>
       ${controlisyCell(d)}
       <td><span class="pill pill-${d.status === "done" ? "completed" : "waiting"}">${d.status === "done" ? "Обработен" : "Нов"}</span></td>
       ${noteCellHtml(d.staff_note, `data-id="${d.id}"`)}

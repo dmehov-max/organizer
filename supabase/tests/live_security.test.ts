@@ -110,6 +110,14 @@ T("live: публичните функции отговарят на OPTIONS (CO
   }
 });
 
+T("live: свободната регистрация е изключена (потребители се създават само от admin)", async () => {
+  const { url, key } = await publicConfig();
+  const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } });
+  const s = await res.json();
+  assertEquals(s.disable_signup, true, "Supabase → Authentication → Sign In / Providers → „Allow new users to sign up“ трябва да е изключено");
+  assertEquals(s.external?.anonymous_users, false, "анонимни входове трябва да са изключени");
+});
+
 T("live: невалиден линк за качване не разкрива нищо", async () => {
   const { url } = await publicConfig();
   const res = await fetch(`${url}/functions/v1/upload---document`, {

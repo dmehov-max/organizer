@@ -1,32 +1,30 @@
-# send-notifications — дневен cron за известия
+# send-notifications — имейл известия до служителите
 
-Виж коментарите в `index.ts` и `SPEC.md` §5.
+На живо като **`hyper-service`**. Дневен сборен имейл на служител за
+наближаващи срокове (5 раб. дни / утре / днес), тревога при отказано
+потвърждение, непрочетени вътрешни съобщения и дайджест на
+просроченото до admin-ите. Идемпотентно през `notification_log`.
 
-## Преди деплой — нужен е Resend акаунт
+## Изпращане (от 07.11.2026)
 
-1. Регистрация на [resend.com](https://resend.com) (безплатен план е
-   достатъчен за начало — 100 имейла/ден, 3000/месец).
-2. **API Keys** → Create API Key → копирай ключа (започва с `re_...`).
-3. **Domains** → добави домейн (напр. поддомейн на `korekt-bg.com`) и
-   верифицирай през DNS записите, които Resend дава — иначе можеш да
-   пращаш само до собствения си имейл (sandbox режим), не към екипа.
-   Може да продължим първо в sandbox за тест, домейн — по-late.
+Всички писма от системата тръгват от **info@mehovconsult.com** през
+SMTP на пощенския сървър на домейна (порт 465), с пауза между
+писмата. Resend вече не се ползва (домейнът там не беше верифициран и
+писмата падаха с 403).
 
-## Деплой (през таблото, без CLI)
+Secrets (Edge Functions → Secrets), същите като при
+`vat-documents-reminder` и `forward-to-controlisy`:
 
-1. Supabase таблото → **Edge Functions** → Create a new function →
-   постави съдържанието на `index.ts` → Deploy
-2. **Edge Functions → Secrets** → добави:
-   - `RESEND_API_KEY` = ключът от Resend
-   - `RESEND_FROM` = напр. `Органайзер <organizer@korekt-bg.com>`
-     (или остави без него, ще ползва временен sandbox адрес)
-3. Насрочи да се пуска дневно — таб Cron/Schedule на функцията,
-   разписание напр. `0 5 * * *` (след `generate-tasks`, за да са
-   задачите вече създадени за деня).
+- `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`
 
-## Проверка
+## Cron
 
-```sql
-select * from cron_heartbeats where job_name = 'daily_notifications' order by ran_at desc limit 5;
-select * from notification_log order by sent_at desc limit 20;
+Към 07.11.2026 **няма** cron задача за тази функция (последен пуск
+08.08.2026). Включва се по образец на `migrations/0072_drive_check_cron.sql`
+(дневно в 06:00 UTC, URL `/functions/v1/hyper-service`).
+
+## Тестове
+
+```
+deno test --allow-net --allow-env supabase/functions/send-notifications/
 ```

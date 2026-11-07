@@ -58,7 +58,7 @@ GitHub Pages, или пусни локален статичен сървър в 
 | Какво | Команда |
 |---|---|
 | Типове на Edge Functions | `deno check supabase/functions/*/index.ts` |
-| Unit тестове на функциите (чиста логика, без живата база) | `deno test --allow-net --allow-env supabase/functions/` |
+| Unit тестове на функциите (чиста логика, без живата база) | `deno test --allow-net --allow-env --allow-sys supabase/functions/` |
 | Хигиена: без клиентски данни (ЕИК, Drive ID, имена) и тайни в git | `deno test --allow-read --allow-run=git supabase/tests/hygiene.test.ts` |
 | Жива сигурност: без вход нищо не се чете/пише в production (само публичния ключ) | `deno test --allow-net --allow-env --allow-read supabase/tests/live_security.test.ts` |
 | Синтаксис на `index.html` / `upload.html` / `confirm.html` | виж стъпката в workflow-а |
@@ -66,7 +66,7 @@ GitHub Pages, или пусни локален статичен сървър в 
 Локално, всичко наведнъж:
 
 ```
-deno check supabase/functions/*/index.ts && deno test --allow-net --allow-env --allow-read --allow-run=git supabase/
+deno check supabase/functions/*/index.ts && deno test --allow-net --allow-env --allow-sys --allow-read --allow-run=git supabase/
 ```
 
 Правила: клиентски данни **никога** в git (виж

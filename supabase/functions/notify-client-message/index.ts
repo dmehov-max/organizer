@@ -6,7 +6,7 @@
 // практика не е изпратено. Затова index.html вмъква реда в
 // client_messages (под RLS, като себе си) и веднага вика това тук.
 //
-// Защо не направо от браузъра: ключът на Resend не бива да напуска
+// Защо не направо от браузъра: паролата за пощата не бива да напуска
 // сървъра. Функцията проверява ПОД JWT-то на викащия, че той изобщо
 // вижда това съобщение (RLS върши проверката вместо нас), и чак тогава
 // минава на service_role, за да прочете contact_emails/upload_token и
@@ -15,11 +15,16 @@
 // Идемпотентна през client_messages.emailed_at — второ извикване за
 // същото съобщение не праща втори имейл.
 //
-// Изисква secrets: RESEND_API_KEY, RESEND_FROM, PUBLIC_APP_URL
+// Праща се от info@mehovconsult.com през SMTP на домейна (07.11.2026,
+// вместо Resend: домейнът там не е верифициран и писмата не минаваха;
+// един подател за всичко към клиенти — виж vat-documents-reminder).
+//
+// Изисква secrets: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, PUBLIC_APP_URL
 // (SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY са
 // автоматично налични в Edge средата).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import nodemailer from "npm:nodemailer@6.9.16";
 
 // Без тези хедъри браузърът тихо блокира извикването от GitHub Pages и
 // изглежда "все едно нищо не се случва" — вече минахме през този урок
@@ -33,8 +38,8 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Органайзер <onboarding@resend.dev>";
+const FROM = "МЕХОВ Консулт <info@mehovconsult.com>";
+const REPLY_TO = "info@mehovconsult.com";
 const PUBLIC_APP_URL = Deno.env.get("PUBLIC_APP_URL") ?? "https://dmehov-max.github.io/organizer/";
 
 /** Текстът на писмото. Изнесен, за да е четим и тестваем отделно от
@@ -135,14 +140,16 @@ async function handler(req: Request): Promise<Response> {
       link,
     });
 
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: RESEND_FROM, to: recipients, subject, text }),
-    });
-    if (!res.ok) {
-      const detail = await res.text();
-      return new Response(JSON.stringify({ ok: false, error: `Resend: ${res.status} ${detail}` }), {
+    try {
+      const transport = nodemailer.createTransport({
+        host: Deno.env.get("SMTP_HOST")!,
+        port: 465,
+        secure: true,
+        auth: { user: Deno.env.get("SMTP_USER")!, pass: Deno.env.get("SMTP_PASSWORD")! },
+      });
+      await transport.sendMail({ from: FROM, replyTo: REPLY_TO, to: recipients, subject, text });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: `SMTP: ${e instanceof Error ? e.message : String(e)}` }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

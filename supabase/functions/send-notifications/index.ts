@@ -21,10 +21,14 @@
 //
 // Идемпотентно през notification_log (SPEC.md §5, review бележка).
 //
+// Праща се от info@mehovconsult.com през SMTP на домейна (07.11.2026,
+// вместо Resend: домейнът там не е верифициран).
+//
 // Изисква secrets (Edge Functions → Secrets):
-//   RESEND_API_KEY, RESEND_FROM
+//   SMTP_HOST, SMTP_USER, SMTP_PASSWORD
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import nodemailer from "npm:nodemailer@6.9.16";
 
 const SOFIA_TZ = "Europe/Sofia";
 
@@ -82,21 +86,27 @@ export function businessDaysBetween(fromISO: string, toISO: string, holidays: Se
 // Email
 // ---------------------------------------------------------------
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Органайзер <onboarding@resend.dev>";
+const FROM = "Органайзер — МЕХОВ Консулт <info@mehovconsult.com>";
+// Пауза между писмата (служителите са малко, но правилото е едно за
+// всички изходящи писма — виж vat-documents-reminder).
+export const SEND_PAUSE_MS = 2000;
+let sentSoFar = 0;
 
 async function sendEmail(to: string[], subject: string, text: string): Promise<{ ok: boolean; error?: string }> {
   if (to.length === 0) return { ok: true };
   try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: RESEND_FROM, to, subject, text }),
+    if (sentSoFar > 0) await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
+    const transport = nodemailer.createTransport({
+      host: Deno.env.get("SMTP_HOST")!,
+      port: 465,
+      secure: true,
+      auth: { user: Deno.env.get("SMTP_USER")!, pass: Deno.env.get("SMTP_PASSWORD")! },
     });
-    if (!res.ok) return { ok: false, error: `Resend ${res.status}: ${await res.text()}` };
+    await transport.sendMail({ from: FROM, to, subject, text });
+    sentSoFar++;
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: String(e) };
+    return { ok: false, error: `SMTP: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -294,7 +304,7 @@ async function handler(_req: Request): Promise<Response> {
     // е шум — човекът е на работа и ще види брояча в приложението.
     // Не се праща съдържанието на съобщението — вътрешната
     // кореспонденция може да съдържа имена на фирми и данни,
-    // които няма причина да излизат през Resend извън системата.
+    // които няма причина да излизат по имейл извън системата.
     // ------------------------------------------------------------
     const { data: unreadMsgs, error: unreadErr } = await supabase
       .from("staff_messages")

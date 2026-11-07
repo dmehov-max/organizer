@@ -36,8 +36,10 @@ Supabase дава им случайно име, ако не смениш пол�
   директно от index.html веднага след създаване на нов клиент (не се
   чака дневния крон). На живо като **`clever-responder`**.
 - `functions/send-notifications/` — дневен cron, сборни имейли по
-  служител + admin дайджест. Нужен secret `RESEND_API_KEY` (+
-  опционално `RESEND_FROM`). На живо като **`hyper-service`**.
+  служител + admin дайджест. От 07.11.2026 праща през SMTP на
+  info@mehovconsult.com (secrets `SMTP_HOST/USER/PASSWORD`), не през
+  Resend. На живо като **`hyper-service`**. ВНИМАНИЕ: няма cron за
+  нея (последен пуск 08.08.2026) — включва се при нужда като 0072.
 - `functions/recognize-confirmation/` — чете текста на прикачени PDF
   потвърждения (вх. номер, дублиране, ЕИК/име на фирма). На живо като
   **`hyper-handler`**.

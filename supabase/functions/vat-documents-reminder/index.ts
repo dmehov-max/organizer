@@ -45,6 +45,15 @@ const LAST_SCAN_DAY = 15;
 // Колко дни след датата още може да тръгне закъсняло писмо (например
 // ако проверката на пощата е паднала в самия ден).
 const CATCH_UP_DAYS = 2;
+// Пауза между две писма до клиенти (07.11.2026): 35 писма в една
+// секунда от един адрес изглеждат като спам за получаващите сървъри.
+// 4 с × 35 = ~2,5 мин — спокойно в лимита на функцията.
+export const SEND_PAUSE_MS = 4000;
+// Четенето на отговорите по IMAP понякога зависва („няма отговор след
+// 70 с“, 07.11.2026) — втори опит след кратка пауза, преди да се
+// откажем за деня.
+export const IMAP_ATTEMPTS = 2;
+export const IMAP_RETRY_PAUSE_MS = 8000;
 const CONFIRM_PAGE = "https://dmehov-max.github.io/organizer/confirm.html";
 
 const MONTHS = [
@@ -434,7 +443,16 @@ async function handler(req: Request): Promise<Response> {
     if (shouldScan) {
       try {
         const monthStart = `${today.slice(0, 7)}-01`;
-        const replies = await readReplies(monthStart, schedule.periodName);
+        let replies: Reply[] = [];
+        for (let attempt = 1; attempt <= IMAP_ATTEMPTS; attempt++) {
+          try {
+            replies = await readReplies(monthStart, schedule.periodName);
+            break;
+          } catch (e) {
+            if (attempt === IMAP_ATTEMPTS) throw e;
+            await new Promise((r) => setTimeout(r, IMAP_RETRY_PAUSE_MS));
+          }
+        }
         for (const reply of replies) {
           const client = matchClient(reply.from, reply.subject, allClients, mode === "test" ? testRecipient : null);
           if (!client) continue;
@@ -532,6 +550,7 @@ async function handler(req: Request): Promise<Response> {
 
       for (const client of clients) {
         if (sentIds.has(client.id)) continue;
+        if (sent > 0) await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
 
         const isVat = vatClientIds.has(client.id);
         const confirmUrl = `${CONFIRM_PAGE}?t=${tokens.get(client.id)}`;

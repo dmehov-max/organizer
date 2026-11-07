@@ -3110,7 +3110,7 @@ async function loadClients() {
 
 document.getElementById("clients-responsible-filter").addEventListener("change", loadClients);
 
-const DOSSIER_FLAGS = { sol: "СОЛ", sol_personal_labor: "СОЛ с личен труд", td: "ТД", gd: "ГД" };
+const DOSSIER_FLAGS = { sol: "СОЛ", sol_personal_labor: "СОЛ с личен труд", td: "ТД", gd: "ГД", foreign_accounts: "Сметки в чужбина" };
 
 // Честота по типа на deadline_rule (SPEC.md §6 конвенция) — само за
 // групиране в UI, не участва в реалното изчисление на срока.

@@ -10,7 +10,11 @@ import {
   buildFollowUp,
   classifyReply,
   dueStage,
+  findTextPart,
+  htmlToText,
   IMAP_ATTEMPTS,
+  IMAP_READ_DEADLINE_MS,
+  IMAP_RETRY_PAUSE_MS,
   kindForStage,
   matchClient,
   monthSchedule,
@@ -72,6 +76,11 @@ Deno.test("IMAP: поне два опита преди отказ за деня"
   assert(IMAP_ATTEMPTS >= 2);
 });
 
+Deno.test("IMAP: всички опити + паузите се побират под 120 с (лимитът на шлюза е 150 с)", () => {
+  const worst = IMAP_ATTEMPTS * IMAP_READ_DEADLINE_MS + (IMAP_ATTEMPTS - 1) * IMAP_RETRY_PAUSE_MS;
+  assert(worst <= 120_000, String(worst));
+});
+
 // ---------- отговори ----------
 
 Deno.test("stripQuoted: маха цитираното писмо отдолу", () => {
@@ -116,4 +125,23 @@ Deno.test("buildFollowUp: второ и трето писмо имат разл�
   assert(s2.subject.startsWith("Напомняне:"));
   assert(s3.subject.startsWith("Второ напомняне:"));
   assert(s2.text.includes("https://x/c?t=1"));
+});
+
+// ---------- четене на отговора по IMAP ----------
+
+Deno.test("findTextPart: предпочита text/plain, иначе text/html; едночастно писмо е част 1", () => {
+  const multi = { type: "multipart/alternative", childNodes: [{ part: "1", type: "text/plain" }, { part: "2", type: "text/html" }] };
+  assertEquals(findTextPart(multi), { part: "1", html: false });
+  const htmlOnly = { type: "multipart/mixed", childNodes: [{ part: "1", type: "text/html" }, { part: "2", type: "application/pdf" }] };
+  assertEquals(findTextPart(htmlOnly), { part: "1", html: true });
+  assertEquals(findTextPart({ type: "text/plain" }), { part: "1", html: false });
+  assertEquals(findTextPart({ type: "application/pdf" }), null);
+  assertEquals(findTextPart(undefined), null);
+});
+
+Deno.test("htmlToText: маха таговете и стила, пази редовете", () => {
+  const t = htmlToText("<html><style>p{}</style><body><p>Качено.</p><div>Поздрави &amp; благодаря</div></body></html>");
+  assert(t.startsWith("Качено."));
+  assert(t.includes("Поздрави & благодаря"));
+  assert(!t.includes("<"));
 });

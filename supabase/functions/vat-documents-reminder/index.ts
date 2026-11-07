@@ -30,7 +30,6 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.16";
 import MailComposer from "npm:nodemailer@6.9.16/lib/mail-composer/index.js";
 import { ImapFlow } from "npm:imapflow@1.0.171";
-import { simpleParser } from "npm:mailparser@3.7.2";
 
 const SOFIA_TZ = "Europe/Sofia";
 const JOB_NAME = "vat_documents_reminder";
@@ -54,6 +53,10 @@ export const SEND_PAUSE_MS = 4000;
 // откажем за деня.
 export const IMAP_ATTEMPTS = 2;
 export const IMAP_RETRY_PAUSE_MS = 8000;
+// Два опита + паузата трябва да се поберат с голям запас под 150 с.
+export const IMAP_READ_DEADLINE_MS = 40_000;
+// Отговорът на клиент е кратък; таван срещу писма с огромно тяло.
+const MAX_REPLY_BYTES = 200_000;
 const CONFIRM_PAGE = "https://dmehov-max.github.io/organizer/confirm.html";
 
 const MONTHS = [
@@ -346,20 +349,75 @@ type Reply = {
   text: string;
 };
 
+/** Текстовата част на писмото по bodyStructure: text/plain, иначе
+ * text/html; при едночастно писмо частта е "1". */
+export function findTextPart(node: BodyNode | undefined): { part: string; html: boolean } | null {
+  if (!node) return null;
+  const flat: BodyNode[] = [];
+  const walk = (n: BodyNode) => { flat.push(n); (n.childNodes ?? []).forEach(walk); };
+  walk(node);
+  const plain = flat.find((n) => n.type === "text/plain");
+  if (plain) return { part: plain.part ?? "1", html: false };
+  const html = flat.find((n) => n.type === "text/html");
+  if (html) return { part: html.part ?? "1", html: true };
+  return null;
+}
+
+export type BodyNode = { part?: string; type?: string; childNodes?: BodyNode[] };
+
+/** Груб HTML → текст, само за писма без text/plain част. */
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<(br|\/p|\/div|\/tr)\b[^>]*>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .trim();
+}
+
 /** Отговорите за месеца в info@. Кутията е отворена само за четене,
  * за да не се маркират писмата като прочетени. Съдържанието се сваля
  * само за писмата с нашата тема, а автоматичните отговори се прескачат. */
 async function readReplies(sinceISO: string, periodName: string): Promise<Reply[]> {
   const client = imapClient();
+  // Твърд таван за цялото четене (07.11.2026): ако сървърът спре да
+  // отговаря по средата, опитът се брои за неуспешен и връзката се реже,
+  // вместо функцията да умре на лимита на шлюза (150 с).
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      console.log(`[vat] imap deadline ${IMAP_READ_DEADLINE_MS} ms — затварям връзката`);
+      client.close();
+      reject(new Error(`IMAP не отговори за ${IMAP_READ_DEADLINE_MS / 1000} с`));
+    }, IMAP_READ_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([readRepliesWith(client, sinceISO, periodName), deadline]);
+  } finally {
+    clearTimeout(timer);
+    client.close();
+  }
+}
+
+async function readRepliesWith(client: ImapFlow, sinceISO: string, periodName: string): Promise<Reply[]> {
   const replies: Reply[] = [];
   await client.connect();
   try {
     const lock = await client.getMailboxLock("INBOX", { readOnly: true });
     try {
-      const uids = await client.search({ since: new Date(`${sinceISO}T00:00:00Z`) }, { uid: true });
+      // Търсим на сървъра само писмата с нашата тема (SUBJECT е
+      // подниз, без регистър), не всички от месеца — иначе теглехме
+      // envelope на цялата поща от 1-во число и сървърът спираше да
+      // отговаря (07.11.2026).
+      const uids = await client.search(
+        { since: new Date(`${sinceISO}T00:00:00Z`), subject: "документи за" },
+        { uid: true },
+      );
+      console.log(`[vat] imap search: ${uids ? uids.length : 0} писма`);
       const matching: { uid: number; messageId: string; from: string; subject: string; date: Date | null }[] = [];
       if (uids && uids.length > 0) {
-        for await (const m of client.fetch(uids, { envelope: true, uid: true }, { uid: true })) {
+        for await (const m of client.fetch(uids.join(","), { envelope: true, uid: true }, { uid: true })) {
+          console.log(`[vat] imap envelope uid=${m.uid}`);
           const subject = m.envelope?.subject ?? "";
           const from = m.envelope?.from?.[0]?.address ?? "";
           if (!subject.toLowerCase().includes(`документи за ${periodName}`) || !from || !m.envelope?.messageId) continue;
@@ -373,18 +431,37 @@ async function readReplies(sinceISO: string, periodName: string): Promise<Reply[
           });
         }
       }
+      console.log(`[vat] imap matching: ${matching.length}`);
+      // Не се тегли цялото писмо (fetch source): на Deno това убиваше
+      // функцията (07.11.2026, WORKER_RESOURCE_LIMIT). Тегли се само
+      // текстовата част, с таван по байтове.
       for (const m of matching) {
-        const part = await client.fetchOne(String(m.uid), { source: true }, { uid: true });
-        if (!part || !part.source) continue;
-        const parsed = await simpleParser(part.source);
-        if (parsed.headers.get("auto-submitted") && parsed.headers.get("auto-submitted") !== "no") continue;
-        replies.push({ messageId: m.messageId, from: m.from, subject: m.subject, date: m.date, text: parsed.text ?? "" });
+        const meta = await client.fetchOne(String(m.uid), { bodyStructure: true, headers: ["auto-submitted"] }, { uid: true });
+        if (!meta) continue;
+        const headers = meta.headers ? new TextDecoder().decode(meta.headers) : "";
+        if (/^auto-submitted:\s*(?!no\b)/im.test(headers)) continue;
+        const textPart = findTextPart(meta.bodyStructure as BodyNode | undefined);
+        let text = "";
+        if (textPart) {
+          const dl = await client.download(String(m.uid), textPart.part, { uid: true, maxBytes: MAX_REPLY_BYTES });
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of dl.content) chunks.push(chunk as Uint8Array);
+          const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+          let off = 0;
+          for (const c of chunks) { bytes.set(c, off); off += c.length; }
+          let decoder: TextDecoder;
+          try { decoder = new TextDecoder(dl.meta?.charset || "utf-8"); } catch { decoder = new TextDecoder(); }
+          text = decoder.decode(bytes);
+          if (textPart.html) text = htmlToText(text);
+        }
+        console.log(`[vat] imap reply uid=${m.uid} text=${text.length}`);
+        replies.push({ messageId: m.messageId, from: m.from, subject: m.subject, date: m.date, text });
       }
     } finally {
       lock.release();
     }
   } finally {
-    await client.logout();
+    await client.logout().catch(() => {});
   }
   return replies;
 }
@@ -420,7 +497,12 @@ async function handler(req: Request): Promise<Response> {
     const schedule = monthSchedule(y, m, holidays);
     const force = mode === "test" && body.force === true;
     const stage = force ? (body.stage ?? null) : dueStage(today, schedule);
-    const shouldScan = force || (today >= schedule.sendISO && d <= LAST_SCAN_DAY);
+    // skip_scan (само в test с force): проба на изпращането без IMAP.
+    const shouldScan = force && body.skip_scan === true
+      ? false
+      : force || (today >= schedule.sendISO && d <= LAST_SCAN_DAY);
+    const t0 = Date.now();
+    const lap = (what: string) => console.log(`[vat] ${what} @ ${Date.now() - t0} ms`);
 
     if (!stage && !shouldScan) {
       return json({ ok: true, skipped: `няма работа днес`, mode });
@@ -447,6 +529,7 @@ async function handler(req: Request): Promise<Response> {
     let scanFailed = false;
 
     if (shouldScan) {
+      lap("scan start");
       try {
         const monthStart = `${today.slice(0, 7)}-01`;
         let replies: Reply[] = [];
@@ -495,6 +578,7 @@ async function handler(req: Request): Promise<Response> {
         scanFailed = true;
         errors.push(`поща: ${e instanceof Error ? e.message : String(e)}`);
       }
+      lap(`scan end (failed=${scanFailed})`);
     }
 
     let sent = 0;
@@ -575,7 +659,9 @@ async function handler(req: Request): Promise<Response> {
           ? `ТЕСТ: реално писмо щеше да отиде до ${client.contact_emails?.length ?? 0} адрес(а) на ${client.name}.\n\n${email.text}`
           : email.text;
 
+        lap(`send ${client.name}`);
         const error = to.length === 0 ? "Няма имейл на клиента" : await sendEmail(to, subject, text, sentFolder, copyErrors);
+        lap(`sent ${client.name} ${error ? "ERR" : "ok"}`);
         results.push({ name: client.name, error });
         if (error) errors.push(`${client.name}: ${error}`);
         else sent++;

@@ -259,6 +259,12 @@ function imapClient() {
     secure: true,
     auth: { user: Deno.env.get("SMTP_USER")!, pass: Deno.env.get("SMTP_PASSWORD")! },
     logger: false,
+    // Бързо отказване (07.11.2026): по подразбиране ImapFlow чака ~70 с
+    // на зависнала връзка; два опита + копието в „Изпратени“ надхвърляха
+    // лимита на шлюза (504) и писмата изобщо не тръгваха.
+    connectionTimeout: 15_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 60_000,
   });
 }
 
@@ -542,10 +548,16 @@ async function handler(req: Request): Promise<Response> {
       if (statusReadErr) throw statusReadErr;
       const tokens = new Map((statuses ?? []).map((r: { client_id: string; token: string }) => [r.client_id, r.token]));
 
-      try {
-        sentFolder = await openSentFolder();
-      } catch (e) {
-        copyErrors.push(`папка „Изпратени“: ${e instanceof Error ? e.message : String(e)}`);
+      // Ако IMAP току-що не е отговорил, не го чакаме пак за копието в
+      // „Изпратени“ — писмата са по-важни от копието.
+      if (scanFailed) {
+        copyErrors.push("папка „Изпратени“: пропуснато — IMAP не отговори при четенето на отговорите");
+      } else {
+        try {
+          sentFolder = await openSentFolder();
+        } catch (e) {
+          copyErrors.push(`папка „Изпратени“: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
 
       for (const client of clients) {

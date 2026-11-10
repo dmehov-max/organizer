@@ -4010,6 +4010,12 @@ async function loadTaskTimeReport() {
 // клиентите/досието/Осчетоводяване — не и през задачите (tasks).
 
 const INSPECTION_KIND_LABELS = { inspection: "Проверка", audit: "Ревизия" };
+// awaiting_reply (0082): подадено от нас (напр. заявление до НАП), чака отговор.
+const INSPECTION_STATUS = {
+  open: { label: "Открита", pill: "waiting" },
+  awaiting_reply: { label: "Чака отговор", pill: "submitted" },
+  closed: { label: "Приключена", pill: "completed" },
+};
 
 async function loadInspections() {
   const body = document.getElementById("inspections-body");
@@ -4028,10 +4034,10 @@ async function loadInspections() {
       <td>${INSPECTION_KIND_LABELS[insp.kind] ?? insp.kind}</td>
       <td>${escapeHtml(insp.title)}</td>
       <td>${insp.due_date ? formatDateBg(insp.due_date) : "—"}</td>
-      <td><span class="pill pill-${insp.status === "closed" ? "completed" : "waiting"}">${insp.status === "closed" ? "Приключена" : "Открита"}</span></td>
+      <td><span class="pill pill-${(INSPECTION_STATUS[insp.status] ?? INSPECTION_STATUS.open).pill}">${(INSPECTION_STATUS[insp.status] ?? INSPECTION_STATUS.open).label}</span></td>
       <td>${insp.storage_path ? `<a class="linklike insp-view-btn" data-path="${escapeHtml(insp.storage_path)}">Виж PDF</a>` : `<span style="color:var(--muted)">—</span>`}</td>
       ${noteCellHtml(insp.note, `data-id="${insp.id}"`)}
-      <td><button class="small insp-toggle-btn" data-id="${insp.id}" data-status="${insp.status}">${insp.status === "closed" ? "Отвори пак" : "Приключи"}</button></td>
+      <td>${insp.status === "open" ? `<button class="small insp-await-btn" data-id="${insp.id}">Чака отговор</button> ` : ""}<button class="small insp-toggle-btn" data-id="${insp.id}" data-status="${insp.status}">${insp.status === "closed" ? "Отвори пак" : "Приключи"}</button></td>
     </tr>
   `).join("");
 
@@ -4051,6 +4057,16 @@ async function loadInspections() {
       const { error } = await supabase.from("inspections").update({ status: newStatus }).eq("id", btn.dataset.id);
       if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
       logAudit("inspection", btn.dataset.id, "status_changed", { to: newStatus });
+      loadInspections();
+    });
+  });
+
+  body.querySelectorAll(".insp-await-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const { error } = await supabase.from("inspections").update({ status: "awaiting_reply" }).eq("id", btn.dataset.id);
+      if (error) { showBanner("Грешка: " + error.message); btn.disabled = false; return; }
+      logAudit("inspection", btn.dataset.id, "status_changed", { to: "awaiting_reply" });
       loadInspections();
     });
   });

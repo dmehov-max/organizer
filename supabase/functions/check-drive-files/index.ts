@@ -16,11 +16,24 @@
 // Папката на фирмата се взима от clients.drive_folder_id (0073);
 // засичане по име само ако полето е празно (виж resolveClientFolder).
 //
+// 2026-11-10: ДДС сумата — DEKLAR.txt се търси и в <фирма>/ДДС/ММ.ГГГГ/,
+// когато месечната папка <фирма>/<ГГГГ>/<ММ…>/ съществува (с фактурите),
+// но DEKLAR не е в нея. ДДС задачите, вече засечени без сума, се
+// проверяват отново. Сумата се пише само ако ЕИК във файла = ЕИК на фирмата.
+// Намерен DEKLAR на същата фирма слага и "Създадено" (с датата на файла).
+// DEKLAR, създаден преди края на месеца, се пренебрегва (deklarCreatedAfterPeriod).
+// v12 (2026-11-12): сумата се обновява, ако DEKLAR е генериран наново с друга
+// сума — проверяват се всички ДДС задачи до ~60 дни назад, и подадените.
+// v13 (2026-11-14): "Подаване" на ДДС от PDF-а на подадената справка-
+// декларация от портала на НАП в месечната папка — входящият номер се
+// записва в задачата (виж parseVatPortalPdf / buildVatSubmissionUpdate).
+//
 // Изисква secrets:
 //   GOOGLE_SERVICE_ACCOUNT_KEY — цялото JSON съдържание на ключа
 //   FIRMI_FOLDER_ID            — ID-то на root папката "Firmi" в Drive
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { extractText, getDocumentProxy } from "npm:unpdf";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -206,6 +219,121 @@ export function parseDeklarVatAmount(
     return { amount: kl60, direction: "refund" };
   }
   return { amount: 0, direction: "due" }; // нулева декларация — и двете кл.50/кл.60 са 0
+}
+
+/** DEKLAR.txt започва с ДДС номера на фирмата ("BG206521026  ВИЖУАЛАЙЗ…").
+ * Сумата се приема само ако това е същата фирма — пази от DEKLAR на
+ * чужда фирма, копиран по грешка в папката. */
+export function deklarMatchesEik(text: string, eik: string | null | undefined): boolean {
+  if (!isValidEik(eik)) return false;
+  const head = text.trimStart().slice(0, 20).toUpperCase().replace(/\s+/g, " ");
+  const m = /^(?:BG)?(\d{9,13})\b/.exec(head);
+  return !!m && m[1] === eik;
+}
+
+/** DEKLAR за месец M е валиден само ако е създаден след края на M
+ * (Додо, 2026-11-10 — случай Албена Експрес: DEKLAR за 10.2026 от
+ * 09.10.2026, т.е. без документите след 9-и). Граница: 00:00 ч. на 1-во
+ * число на M+1 по българско време (UTC+3 лятно → взимаме −3 ч., за да не
+ * отхвърлим файл, създаден в първите минути на месеца). Липсваща дата →
+ * не приемаме (по-добре нищо, отколкото непълна декларация). */
+export function deklarCreatedAfterPeriod(
+  modifiedTime: string | undefined,
+  ym: { year: number; month: number },
+): boolean {
+  const t = modifiedTime ? Date.parse(modifiedTime) : NaN;
+  if (Number.isNaN(t)) return false;
+  const periodEnd = Date.UTC(ym.year, ym.month, 1) - 3 * 3600 * 1000; // month е 1-12 → 1-во на следващия
+  return t >= periodEnd;
+}
+
+// ---------------------------------------------------------------
+// ДДС "Подаване" от PDF-а на портала на НАП (поискано изрично
+// 2026-11-14, тест с една фирма + сверка с ръчно вписаните номера на
+// 10.2026). След подаване счетоводителят записва от портала PDF на
+// справка-декларацията (името е "portal.nra.bg_…ShowDocument….pdf" или
+// преименувано, напр. "ДДСДневници ДеклVIES 2026.10.pdf") в месечната
+// папка. Само в него има "Входящ номер"; разпечатката от Microinvest
+// отпреди подаването е със същото заглавие, но полето е празно — тя
+// просто не минава parseVatPortalPdf().
+// ---------------------------------------------------------------
+
+export type VatPortalDeclaration = {
+  referenceNumber: string; // "22143699700"
+  referenceDate: string; // "14.11.2026"
+  vatEik: string; // без "BG"
+  periodLabel: string; // "2026-10"
+  vatDue: number | null; // кл. 50, само за сверка
+};
+
+/** Текстът на PDF-а → данните, или null, ако не е подадена справка-
+ * декларация по ЗДДС (няма заглавие, входящ номер, ИН или период).
+ * Работи и с подредбата на unpdf ("Входящ номер 22143699700 / 14.11.2026"
+ * на един ред), и с етикет и стойност на отделни редове. */
+export function parseVatPortalPdf(text: string): VatPortalDeclaration | null {
+  if (!/СПРАВКА-ДЕКЛАРАЦИЯ ЗА ДАНЪК ВЪРХУ ДОБАВЕНАТА СТОЙНОСТ/i.test(text)) return null;
+  const ref = /Входящ\s+номер\s*:?\s*([0-9A-Za-zА-Яа-я]{6,20})\s*\/\s*(\d{2})\.(\d{2})\.(\d{4})/.exec(text);
+  const eik = /ИН\s+по\s+ЗДДС\s*:?\s*BG\s*(\d{9,13})\b/i.exec(text);
+  const period = /Данъчен\s+период\s*:?\s*(\d{4})(\d{2})\b/.exec(text);
+  if (!ref || !eik || !period) return null;
+  const month = Number(period[2]);
+  if (month < 1 || month > 12) return null;
+  const due = /(\d+(?:\.\d+)?)\s+50\s+ДДС\s+за\s+възстановяване/.exec(text);
+  return {
+    referenceNumber: ref[1].toUpperCase(),
+    referenceDate: `${ref[2]}.${ref[3]}.${ref[4]}`,
+    vatEik: eik[1],
+    periodLabel: `${period[1]}-${period[2]}`,
+    vatDue: due ? Number(due[1]) : null,
+  };
+}
+
+/** Само номерът, без дата и интервали — "22143699700/14.11.2026",
+ * "22143699700 / 14.11.2026" и "22143699700" са едно и също. */
+export function referenceKey(s: string): string {
+  return s.split("/")[0].replace(/\s+/g, "").toUpperCase();
+}
+
+/** Какво се пише в ДДС задачата от намерения PDF. Нищо вписано на ръка
+ * не се презаписва: друг номер → conflict (за skipped), без запис.
+ * Отметката "Подаване" е с датата от входящия номер. Статусът и
+ * "Прието" НЕ се пипат (както при ръчната отметка). */
+export function buildVatSubmissionUpdate(
+  task: { stage_submission_done?: boolean | null; submission_reference_number?: string | null },
+  pdf: VatPortalDeclaration,
+  nowIso: string,
+): { update: Record<string, unknown> | null; conflict: string | null } {
+  const reference = `${pdf.referenceNumber}/${pdf.referenceDate}`;
+  const update: Record<string, unknown> = {};
+  if (task.submission_reference_number) {
+    if (referenceKey(task.submission_reference_number) !== referenceKey(reference)) {
+      return { update: null, conflict: `вписан е ${task.submission_reference_number}, в PDF-а е ${reference}` };
+    }
+  } else {
+    update.submission_reference_number = reference;
+  }
+  if (!task.stage_submission_done) {
+    const [d, m, y] = pdf.referenceDate.split(".");
+    const at = `${y}-${m}-${d}T10:00:00.000Z`; // ~обяд българско време; само датата се показва
+    update.stage_submission_done = true;
+    update.stage_submission_done_at = Date.parse(at) <= Date.parse(nowIso) ? at : nowIso;
+  }
+  return { update: Object.keys(update).length ? update : null, conflict: null };
+}
+
+/** PDF-ите в месечната папка се пробват в този ред (до VAT_PDF_LIMIT):
+ * първо тези, чието име подсказва справката от портала, после най-новите. */
+export const VAT_PDF_LIMIT = 8;
+export function rankVatPdfCandidates(files: DriveFile[]): DriveFile[] {
+  const score = (f: DriveFile) => (/showdocument|ivat|декл|ддс/i.test(f.name) ? 1 : 0);
+  const time = (f: DriveFile) => {
+    const t = f.modifiedTime ? Date.parse(f.modifiedTime) : NaN;
+    return Number.isNaN(t) ? 0 : t;
+  };
+  return files
+    .filter((f) => f.mimeType === "application/pdf")
+    .sort((a, b) => score(b) - score(a) || time(b) - time(a))
+    .slice(0, VAT_PDF_LIMIT);
 }
 
 // ---------------------------------------------------------------
@@ -411,6 +539,81 @@ async function findChildFolder(accessToken: string, parentId: string, name: stri
   return children[0] ?? null;
 }
 
+/** <фирма>/ДДС/<ММ.ГГГГ или друг кандидат>/ — отделната ДДС папка. */
+async function findDdsMonthFolder(
+  accessToken: string,
+  clientFolderId: string,
+  ym: { year: number; month: number },
+): Promise<{ dds: { id: string; name: string }; month: { id: string; name: string } } | null> {
+  const dds = await findChildFolder(accessToken, clientFolderId, "ДДС");
+  if (!dds) return null;
+  for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
+    const f = await findChildFolder(accessToken, dds.id, candidate);
+    if (f) return { dds, month: f };
+  }
+  return null;
+}
+
+async function downloadText1251(accessToken: string, fileId: string): Promise<string | null> {
+  const fileRes = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!fileRes.ok) return null;
+  const buf = await fileRes.arrayBuffer();
+  try {
+    return new TextDecoder("windows-1251").decode(buf);
+  } catch (_e) {
+    return new TextDecoder().decode(buf); // резервно, само цифрите ни трябват все пак
+  }
+}
+
+/** Подадената ДДС справка (PDF от портала) за фирмата и месеца. Гледа в
+ * <фирма>/ДДС/<месец>/, <фирма>/<ГГГГ>/<месец>/ и в подпапка "ДДС" на
+ * всяка от тях (на живо са и трите — 14.11.2026). Приема само PDF с ИН
+ * по ЗДДС = BG+ЕИК на фирмата и период = периода на задачата. */
+async function findVatPortalPdf(
+  accessToken: string,
+  clientFolderId: string,
+  ym: { year: number; month: number },
+  eik: string,
+): Promise<{ pdf: VatPortalDeclaration; file: DriveFile } | null> {
+  const monthFolders: { id: string }[] = [];
+  const dds = await findDdsMonthFolder(accessToken, clientFolderId, ym);
+  if (dds) monthFolders.push(dds.month);
+  const yearFolder = await findChildFolder(accessToken, clientFolderId, String(ym.year));
+  if (yearFolder) {
+    for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
+      const f = await findChildFolder(accessToken, yearFolder.id, candidate);
+      if (f) { monthFolders.push(f); break; }
+    }
+  }
+  const folders = [...monthFolders];
+  for (const mf of monthFolders) {
+    const sub = await findChildFolder(accessToken, mf.id, "ДДС");
+    if (sub) folders.push(sub);
+  }
+  const pdfs: DriveFile[] = [];
+  for (const f of folders) {
+    pdfs.push(...await driveListChildren(accessToken, f.id, " and mimeType = 'application/pdf'"));
+  }
+  const want = `${ym.year}-${String(ym.month).padStart(2, "0")}`;
+  for (const file of rankVatPdfCandidates(pdfs)) {
+    const res = await fetch(`${DRIVE_FILES_URL}/${file.id}?alt=media`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) continue;
+    try {
+      const doc = await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
+      const { text } = await extractText(doc, { mergePages: true });
+      const pdf = parseVatPortalPdf(text);
+      if (pdf && pdf.vatEik === eik && pdf.periodLabel === want) return { pdf, file };
+    } catch (_e) {
+      // повреден/сканиран PDF — следващият
+    }
+  }
+  return null;
+}
+
 // import.meta.main е true само когато Deno изпълнява ТОЗИ файл пряко
 // (production) — не и когато тестов файл го импортира само за да
 // ползва export-натите чисти функции по-горе.
@@ -459,24 +662,70 @@ async function handler(req: Request): Promise<Response> {
       .neq("status", "completed")
       .eq("obligation_types.code", "esti_monthly_report");
     if (estiTasksErr) throw estiTasksErr;
+
+    // ДДС задачи, засечени по месечната папка (с фактурите), но още без
+    // сума — DEKLAR.txt често е в отделната <фирма>/ДДС/ММ.ГГГГ/ (2026-11-10).
+    // При тях пишем само сумата и пътя до DEKLAR; датата на засичане остава.
+    // v12 (2026-11-12): проверяват се ВСИЧКИ ДДС задачи от последните ~60 дни
+    // (и подадените), не само тези без сума — DEKLAR често се генерира наново
+    // след първото засичане и сумата в Органайзера оставаше стара.
+    // Сумата се презаписва само ако е различна.
+    const vatSince = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const { data: vatTasks, error: vatTasksErr } = await supabase
+      .from("tasks")
+      .select(
+        "id, period_label, client_id, stage_creation_done, stage_review_done, stage_submission_done, drive_detected_vat_amount, drive_detected_vat_direction, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
+      )
+      .not("files_generated_detected_at", "is", null)
+      .eq("not_applicable", false)
+      .gte("period_end", vatSince)
+      .eq("obligation_types.code", "vat_declaration");
+    if (vatTasksErr) throw vatTasksErr;
+
+    // v13: ДДС задачи без "Подаване" или без номер — търсим PDF-а от
+    // портала (виж findVatPortalPdf). Само последните ~60 дни.
+    const { data: vatSubmitTasks, error: vatSubmitErr } = await supabase
+      .from("tasks")
+      .select(
+        "id, period_label, client_id, stage_submission_done, submission_reference_number, drive_detected_vat_amount, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
+      )
+      .eq("not_applicable", false)
+      .neq("status", "completed")
+      .gte("period_end", vatSince)
+      .eq("obligation_types.code", "vat_declaration")
+      .or("stage_submission_done.eq.false,submission_reference_number.is.null");
+    if (vatSubmitErr) throw vatSubmitErr;
+
     const seenIds = new Set((tasks ?? []).map((t: any) => t.id));
-    const allTasks = [...(tasks ?? []), ...(estiTasks ?? []).filter((t: any) => !seenIds.has(t.id))];
+    const allTasks: any[] = [...(tasks ?? [])];
+    for (const t of [...(estiTasks ?? []), ...(vatTasks ?? [])] as any[]) {
+      if (seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+      allTasks.push(t);
+    }
+    const vatRecheckIds = new Set((vatTasks ?? []).map((t: any) => t.id));
+    for (const t of tasks ?? []) vatRecheckIds.delete((t as any).id);
 
     let checked = 0;
     let found = 0;
     let declarationsChecked = 0;
     let declarationsFound = 0;
+    let vatAmountsFound = 0;
+    let creationsMarked = 0;
     const skipped: string[] = [];
     const errors: string[] = [];
     const clientFolderCache = new Map<string, ClientFolder | null>();
     let topFolders: { id: string; name: string }[] | null = null; // папките под Firmi — само ако потрябват
     const nowIso = new Date().toISOString();
+    const startedAt = Date.now();
 
     for (const task of allTasks as any[]) {
       try {
         const ym = parseYearMonth(task.period_label);
         if (!ym) continue; // тримесечни/годишни задължения — извън обхвата тук засега
         const code: string | undefined = (task.obligation_types as any)?.code;
+        const isVat = code === "vat_declaration";
+        const vatRecheck = vatRecheckIds.has(task.id);
 
         // Декл. обр. 1 / обр. 6 — по името на файла, не по папки.
         const decl = code ? DECLARATION_FILES[code] : undefined;
@@ -550,14 +799,10 @@ async function handler(req: Request): Promise<Response> {
         // папка на ниво фирма при някои клиенти, отделно от годишното
         // дърво (наблюдавано на живо: <фирма>/ДДС/07.2026/,
         // с DEKLAR.txt/POKUPKI.txt/PRODAGBI.txt — реалните ДДС експорти).
+        let ddsMonth: { dds: { id: string; name: string }; month: { id: string; name: string } } | null = null;
         if (!monthFolder) {
-          const ddsFolder = await findChildFolder(accessToken, clientFolder.id, "ДДС");
-          if (ddsFolder) {
-            for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
-              const f = await findChildFolder(accessToken, ddsFolder.id, candidate);
-              if (f) { monthFolder = f; pathPrefix = `${clientFolder.name}/${ddsFolder.name}`; break; }
-            }
-          }
+          ddsMonth = await findDdsMonthFolder(accessToken, clientFolder.id, ym);
+          if (ddsMonth) { monthFolder = ddsMonth.month; pathPrefix = `${clientFolder.name}/${ddsMonth.dds.name}`; }
         }
         if (!monthFolder) continue;
 
@@ -583,40 +828,90 @@ async function handler(req: Request): Promise<Response> {
         }
 
         const contents = await driveListChildren(accessToken, monthFolder.id);
-        if (contents.length === 0) continue; // папката съществува, но е празна — все още нищо не е качено
-
         const path = `${pathPrefix}/${monthFolder.name}`;
-        const updatePayload: Record<string, unknown> = {
-          files_generated_detected_at: new Date().toISOString(),
-          files_generated_detected_path: path,
-        };
 
         // Best-effort сума на ДДС — само за задължението за ДДС, само
-        // ако DEKLAR.txt е сред намерените файлове, и само ако мине
+        // ако е намерен DEKLAR.txt на същата фирма, и само ако мине
         // двойната самопроверка в parseDeklarVatAmount() (виж коментара
         // там — иначе не пишем нищо, по-добре липсващо от грешно число).
-        if ((task.obligation_types as any)?.code === "vat_declaration") {
-          const deklarFile = contents.find((f) => /deklar/i.test(f.name));
-          if (deklarFile) {
-            const fileRes = await fetch(
-              `${DRIVE_FILES_URL}/${deklarFile.id}?alt=media`,
-              { headers: { Authorization: `Bearer ${accessToken}` } },
+        // DEKLAR се търси в месечната папка, а ако го няма там — в
+        // <фирма>/ДДС/<ММ.ГГГГ>/ (2026-11-10).
+        let vat: { amount: number; direction: "due" | "refund" } | null = null;
+        let deklarPath: string | null = null;
+        let deklarOwn: DriveFile | null = null; // DEKLAR на същата фирма → "Създадено"
+        if (isVat) {
+          let deklarFile: DriveFile | null = contents.find((f) => /deklar/i.test(f.name)) ?? null;
+          if (deklarFile) deklarPath = `${path}/${deklarFile.name}`;
+          if (!deklarFile && !ddsMonth) {
+            const alt = await findDdsMonthFolder(accessToken, clientFolder.id, ym);
+            if (alt) {
+              const altContents = await driveListChildren(accessToken, alt.month.id);
+              deklarFile = altContents.find((f) => /deklar/i.test(f.name)) ?? null;
+              if (deklarFile) deklarPath = `${clientFolder.name}/${alt.dds.name}/${alt.month.name}/${deklarFile.name}`;
+            }
+          }
+          if (deklarFile && !deklarCreatedAfterPeriod(deklarFile.modifiedTime, ym)) {
+            skipped.push(
+              `task ${task.id}: ${deklarPath} е създаден ${deklarFile.modifiedTime ?? "(без дата)"} — преди края на периода; не се отбелязва`,
             );
-            if (fileRes.ok) {
-              const buf = await fileRes.arrayBuffer();
-              let text: string;
-              try {
-                text = new TextDecoder("windows-1251").decode(buf);
-              } catch (_e) {
-                text = new TextDecoder().decode(buf); // резервно, само цифрите ни трябват все пак
-              }
-              const vat = parseDeklarVatAmount(text);
-              if (vat) {
-                updatePayload.drive_detected_vat_amount = vat.amount;
-                updatePayload.drive_detected_vat_direction = vat.direction;
+            deklarFile = null;
+          }
+          if (deklarFile) {
+            const text = await downloadText1251(accessToken, deklarFile.id);
+            if (text) {
+              if (deklarMatchesEik(text, task.clients?.eik_egn)) {
+                deklarOwn = deklarFile;
+                vat = parseDeklarVatAmount(text);
+              } else {
+                skipped.push(`task ${task.id}: ЕИК в ${deklarPath} не съвпада с фирмата — сумата не е записана`);
               }
             }
           }
+        }
+
+        // "Създадено" за ДДС (Додо, 2026-11-10): щом DEKLAR.txt на същата фирма
+        // е в папката, декларацията е създадена — отметката с датата на файла.
+        // Ръчно сложена отметка остава с нейната дата; "Потвърдено от клиента"
+        // и "Проверено" НЕ се пипат.
+        const creationFields = (): Record<string, unknown> => {
+          if (!deklarOwn || task.stage_creation_done) return {};
+          const t = deklarOwn.modifiedTime ? Date.parse(deklarOwn.modifiedTime) : NaN;
+          const at = !Number.isNaN(t) && t <= Date.parse(nowIso) ? new Date(t).toISOString() : nowIso;
+          return { stage_creation_done: true, stage_creation_done_at: at };
+        };
+
+        // Повторна проверка на вече засечена ДДС задача: пишем само сумата,
+        // отметката "Създадено" и пътя до DEKLAR — нищо друго.
+        if (vatRecheck) {
+          const payload: Record<string, unknown> = { ...creationFields() };
+          const oldAmount = task.drive_detected_vat_amount == null ? null : Number(task.drive_detected_vat_amount);
+          if (vat && (oldAmount === null || Math.abs(oldAmount - vat.amount) > 0.004 || task.drive_detected_vat_direction !== vat.direction)) {
+            payload.drive_detected_vat_amount = vat.amount;
+            payload.drive_detected_vat_direction = vat.direction;
+          } else {
+            vat = null; // без промяна — не броим и не пишем
+          }
+          if (Object.keys(payload).length === 0) continue;
+          if (deklarPath) payload.files_generated_detected_path = deklarPath;
+          const { error: vErr } = await supabase.from("tasks").update(payload).eq("id", task.id);
+          if (vErr) throw vErr;
+          if (vat) vatAmountsFound++;
+          if (payload.stage_creation_done) creationsMarked++;
+          continue;
+        }
+
+        if (contents.length === 0 && !deklarPath) continue; // папката съществува, но е празна — все още нищо не е качено
+
+        const updatePayload: Record<string, unknown> = {
+          files_generated_detected_at: new Date().toISOString(),
+          files_generated_detected_path: deklarPath ?? path,
+          ...creationFields(),
+        };
+        if (updatePayload.stage_creation_done) creationsMarked++;
+        if (vat) {
+          updatePayload.drive_detected_vat_amount = vat.amount;
+          updatePayload.drive_detected_vat_direction = vat.direction;
+          vatAmountsFound++;
         }
 
         await supabase.from("tasks").update(updatePayload).eq("id", task.id);
@@ -626,16 +921,71 @@ async function handler(req: Request): Promise<Response> {
       }
     }
 
+    // v13: ДДС "Подаване" + входящ номер от PDF-а на портала.
+    let vatSubmissionsMarked = 0;
+    for (const task of (vatSubmitTasks ?? []) as any[]) {
+      // cron-ът чака до 150 с; PDF-ите се свалят и четат — останалите
+      // задачи остават за следващото пускане (след 2 ч.).
+      if (Date.now() - startedAt > 100_000) {
+        skipped.push("vat-submit: спряно по време, останалите — при следващото пускане");
+        break;
+      }
+      try {
+        const ym = parseYearMonth(task.period_label);
+        const eik: string | undefined = task.clients?.eik_egn;
+        if (!ym || !isValidEik(eik)) continue;
+        const client = { name: task.clients?.name ?? "", drive_folder_id: task.clients?.drive_folder_id as string | null };
+        const cacheKey: string = task.client_id ?? client.name;
+        let clientFolder = clientFolderCache.get(cacheKey);
+        if (clientFolder === undefined) {
+          let resolved = resolveClientFolder(client, topFolders);
+          if (resolved === "needsTopFolders") {
+            topFolders = await driveListChildren(accessToken, firmiFolderId, " and mimeType = 'application/vnd.google-apps.folder'");
+            resolved = resolveClientFolder(client, topFolders);
+          }
+          clientFolder = resolved === "needsTopFolders" ? null : resolved;
+          clientFolderCache.set(cacheKey, clientFolder);
+        }
+        if (!clientFolder) continue;
+
+        const hit = await findVatPortalPdf(accessToken, clientFolder.id, ym, eik);
+        if (!hit) continue; // още не е подадена/качена — пак при следващото пускане
+        const { update, conflict } = buildVatSubmissionUpdate(task, hit.pdf, nowIso);
+        if (conflict) {
+          skipped.push(`task ${task.id} (${client.name} ${task.period_label}): ${conflict} — не е презаписано`);
+          continue;
+        }
+        if (!update) continue;
+        const { error: sErr } = await supabase.from("tasks").update(update).eq("id", task.id);
+        if (sErr) throw sErr;
+        await supabase.from("audit_log").insert({
+          entity_type: "task",
+          entity_id: task.id,
+          action: "stage_changed",
+          details: { field: "stage_submission_done", value: true, source: "swift-worker: PDF от портала на НАП", file: hit.file.name, ...update },
+        });
+        const known = task.drive_detected_vat_amount == null ? null : Number(task.drive_detected_vat_amount);
+        if (known !== null && hit.pdf.vatDue !== null && Math.abs(known - hit.pdf.vatDue) > 0.004) {
+          skipped.push(`task ${task.id} (${client.name} ${task.period_label}): ДДС в подадената справка ${hit.pdf.vatDue}, в DEKLAR.txt ${known}`);
+        }
+        vatSubmissionsMarked++;
+      } catch (e) {
+        errors.push(`vat-submit ${task.id}: ${String(e)}`);
+      }
+    }
+
     await supabase.from("cron_heartbeats").insert({
       job_name: JOB_NAME,
       status: errors.length === 0 ? "ok" : "error",
       details: `checked=${checked} found=${found} decl_checked=${declarationsChecked} decl_found=${declarationsFound}` +
+        ` vat_amounts=${vatAmountsFound} vat_created=${creationsMarked} vat_submitted=${vatSubmissionsMarked}` +
         ` skipped=${skipped.length} errors=${errors.length}` +
         (errors.length ? ` :: ${errors.slice(0, 5).join(" | ")}` : ""),
     });
 
     return new Response(JSON.stringify({
-      ok: errors.length === 0, checked, found, declarationsChecked, declarationsFound, skipped, errors,
+      ok: errors.length === 0, checked, found, declarationsChecked, declarationsFound, vatAmountsFound, creationsMarked,
+      vatSubmissionsMarked, skipped, errors,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

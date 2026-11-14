@@ -19,6 +19,7 @@
     --amber-soft: #f4e8d2;
     --red: #bd5142;
     --red-soft: #f6e2dd;
+    --green: #3d7a45;
     --card: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
@@ -27,6 +28,7 @@
       --accent: #6fb0b3; --accent-ink: #9ccdcf; --accent-soft: rgba(111,176,179,.14);
       --amber: #e0b563; --amber-soft: rgba(224,181,99,.14);
       --red: #e2897c; --red-soft: rgba(226,137,124,.14);
+      --green: #8cc795;
       --card: #1d201a;
     }
   }
@@ -125,6 +127,9 @@
   .stage-cell.stage-done { color: var(--ok, #2e7d32); }
   .stage-cell.stage-active-timer { color: var(--amber); background: var(--amber-soft); animation: pulse-timer 1.4s ease-in-out infinite; }
   .stage-cell.stage-rejected { color: var(--red); background: var(--red-soft); }
+  .vat-amount { font-size: .78rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .vat-due { color: var(--red); }
+  .vat-refund { color: var(--green); }
   @keyframes pulse-timer { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
   .stage-cell .ref-mini { font-size: .68rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
   .progress-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -2277,13 +2282,28 @@ function renderProgressTable(sorted) {
   // клиентите, за които офисът реално плаща вместо тях
   // (clients.office_pays_obligations, виж 0064) — за другите фирми,
   // които си плащат сами, колоната е излишен шум, показва тире.
+  // Сумата на ДДС-то (поискано изрично 2026-11-14) — за ВСИЧКИ фирми,
+  // не само за тези, на които плащаме: за внасяне в червено, за
+  // възстановяване със знак минус в зелено. Идва от DEKLAR.txt в Drive
+  // (swift-worker, drive_detected_vat_amount) — празно, докато
+  // справката не е качена.
+  const vatAmountHtml = (t) => {
+    if (t.obligation_types?.code !== "vat_declaration" || t.drive_detected_vat_amount == null) return "";
+    const refund = t.drive_detected_vat_direction === "refund";
+    const amount = Number(t.drive_detected_vat_amount);
+    const text = `${refund && amount !== 0 ? "−" : ""}${amount.toFixed(2)} €`;
+    const title = refund ? "ДДС за възстановяване (от DEKLAR.txt)" : "ДДС за внасяне (от DEKLAR.txt)";
+    return `<div class="vat-amount ${refund ? "vat-refund" : "vat-due"}" title="${title}">${text}</div>`;
+  };
+
   const paymentCell = (t) => {
+    const amount = vatAmountHtml(t);
     if (!paymentTracked(t)) {
-      return `<td style="text-align:center;color:var(--muted)">—</td>`;
+      return `<td style="text-align:center;color:var(--muted)">${amount || "—"}</td>`;
     }
     const payment = t.task_payments?.[0];
     const paid = !!payment?.paid;
-    return `<td class="stage-cell${paid ? " stage-done" : ""}" data-id="${t.id}" data-field="payment" data-payment-id="${payment?.id ?? ""}" style="cursor:pointer;text-align:center">${paid ? "✓" : ""}${paid ? doneDateMini(payment?.paid_at) : ""}</td>`;
+    return `<td class="stage-cell${paid ? " stage-done" : ""}" data-id="${t.id}" data-field="payment" data-payment-id="${payment?.id ?? ""}" style="cursor:pointer;text-align:center">${amount}${paid ? "✓" : ""}${paid ? doneDateMini(payment?.paid_at) : ""}</td>`;
   };
 
   body.innerHTML = sorted.map(({ t }, i) => {

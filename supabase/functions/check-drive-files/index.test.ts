@@ -7,6 +7,7 @@ import {
   base64url,
   buildDeclarationUpdate,
   buildEstiUpdate,
+  buildVatSubmissionUpdate,
   candidateMonthFolderNames,
   DECLARATION_FILES,
   declarationSearchQuery,
@@ -18,10 +19,14 @@ import {
   normalizeFolderName,
   parseDeklarVatAmount,
   parseNapDeclarationFileName,
+  parseVatPortalPdf,
   parseYearMonth,
   pemToArrayBuffer,
   pickDeclarationFile,
+  rankVatPdfCandidates,
+  referenceKey,
   resolveClientFolder,
+  VAT_PDF_LIMIT,
 } from "./index.ts";
 
 // Реален ред от СКРИЙН БОКС ООД/ДДС/07.2026/DEKLAR.txt (07.08.2026),
@@ -540,4 +545,136 @@ Deno.test("pickEstiFile: взема най-ранния файл", () => {
   const a = { id: "1", name: "a.pdf", mimeType: "application/pdf", modifiedTime: "2026-11-03T10:00:00Z" };
   const b = { id: "2", name: "b.pdf", mimeType: "application/pdf", modifiedTime: "2026-11-02T10:00:00Z" };
   assertEquals(pickEstiFile([a, b])?.id, "2");
+});
+
+// ---------- ДДС "Подаване" от PDF-а на портала на НАП (v13) ----------
+// Текстовете са съкратени реални PDF-и (14.11.2026), фирмата, ЕИК и
+// номерът са подменени с измислени.
+
+// Както го дава unpdf (в Edge функцията): етикет и стойност на един ред.
+const VAT_PDF_UNPDF = `СПРАВКА-ДЕКЛАРАЦИЯ ЗА ДАНЪК ВЪРХУ ДОБАВЕНАТА СТОЙНОСТ
+А: Наименование и адрес за кореспонденция на
+регистрираното лице ТД на НАП / офис 2214 - ОФИС
+ИЗТОК
+Регистрирано лице: ПРИМЕР ООД Входящ номер 22100000001
+/ 14.11.2026
+Упълномощено лице: 0000000000/ИМЕ ПРИМЕРНО Данъчен период: 202610
+ИН по ЗДДС: BG100000012
+Раздел А: Данни за начислен данък върху добавената стойност
+1730.37 50 ДДС за възстановяване (кл. 20 - кл. 40) < 0 0 60`;
+
+// Същото, но етикет и стойност на отделни редове (PyMuPDF и др.).
+const VAT_PDF_LINES = `СПРАВКА-ДЕКЛАРАЦИЯ ЗА ДАНЪК ВЪРХУ ДОБАВЕНАТА СТОЙНОСТ
+Регистрирано лице:  ПРИМЕР ЕООД
+Входящ номер
+22000000002
+/ 12.11.2026
+Данъчен период:
+202610
+
+ИН по ЗДДС:
+BG100000013
+0 50 ДДС за възстановяване (кл. 20 - кл. 40) < 0`;
+
+// Разпечатка от Microinvest ОТПРЕДИ подаването — същото заглавие, но
+// без входящ номер и без период след етикета.
+const VAT_PDF_MICROINVEST = `СПРАВКА-ДЕКЛАРАЦИЯ ЗА ДАНЪК ВЪРХУ ДОБАВЕНАТА СТОЙНОСТ
+ПРИМЕР ООД
+100000012
+BG100000012
+10.2026
+ИН:
+ИН по ЗДДС:
+Данъчен период:
+Вх.№ /`;
+
+Deno.test("parseVatPortalPdf: подредба на unpdf — номер, дата, ИН, период, кл. 50", () => {
+  assertEquals(parseVatPortalPdf(VAT_PDF_UNPDF), {
+    referenceNumber: "22100000001",
+    referenceDate: "14.11.2026",
+    vatEik: "100000012",
+    periodLabel: "2026-10",
+    vatDue: 1730.37,
+  });
+});
+
+Deno.test("parseVatPortalPdf: етикет и стойност на отделни редове", () => {
+  const p = parseVatPortalPdf(VAT_PDF_LINES)!;
+  assertEquals([p.referenceNumber, p.referenceDate, p.vatEik, p.periodLabel, p.vatDue], ["22000000002", "12.11.2026", "100000013", "2026-10", 0]);
+});
+
+Deno.test("parseVatPortalPdf: разпечатка от Microinvest без входящ номер → null", () => {
+  assertEquals(parseVatPortalPdf(VAT_PDF_MICROINVEST), null);
+});
+
+Deno.test("parseVatPortalPdf: друг документ (без заглавието на справката) → null", () => {
+  assertEquals(parseVatPortalPdf("Входящ номер 22100000001 / 14.11.2026 ИН по ЗДДС: BG100000012 Данъчен период: 202610"), null);
+  assertEquals(parseVatPortalPdf(""), null);
+});
+
+Deno.test("referenceKey: различните записи на един номер са равни", () => {
+  assertEquals(referenceKey("22100000001/14.11.2026"), "22100000001");
+  assertEquals(referenceKey("22100000001 / 14.11.2026"), "22100000001");
+  assertEquals(referenceKey("22100000001"), "22100000001");
+});
+
+const VAT_PDF = parseVatPortalPdf(VAT_PDF_UNPDF)!;
+const NOW_V13 = "2026-11-14T12:30:00.000Z";
+
+Deno.test("buildVatSubmissionUpdate: празна задача → Подаване с датата от номера + номерът", () => {
+  assertEquals(buildVatSubmissionUpdate({ stage_submission_done: false, submission_reference_number: null }, VAT_PDF, NOW_V13), {
+    update: {
+      submission_reference_number: "22100000001/14.11.2026",
+      stage_submission_done: true,
+      stage_submission_done_at: "2026-11-14T10:00:00.000Z",
+    },
+    conflict: null,
+  });
+});
+
+Deno.test("buildVatSubmissionUpdate: отметнато на ръка без номер → само номерът", () => {
+  assertEquals(buildVatSubmissionUpdate({ stage_submission_done: true, submission_reference_number: null }, VAT_PDF, NOW_V13), {
+    update: { submission_reference_number: "22100000001/14.11.2026" },
+    conflict: null,
+  });
+});
+
+Deno.test("buildVatSubmissionUpdate: същият номер, вписан на ръка в друг формат → нищо", () => {
+  assertEquals(
+    buildVatSubmissionUpdate({ stage_submission_done: true, submission_reference_number: "22100000001" }, VAT_PDF, NOW_V13),
+    { update: null, conflict: null },
+  );
+});
+
+Deno.test("buildVatSubmissionUpdate: ДРУГ номер вписан на ръка → conflict, нищо не се презаписва", () => {
+  const r = buildVatSubmissionUpdate({ stage_submission_done: true, submission_reference_number: "22999999999" }, VAT_PDF, NOW_V13);
+  assertEquals(r.update, null);
+  assert(r.conflict?.includes("22999999999"));
+});
+
+Deno.test("buildVatSubmissionUpdate: дата от бъдещето (разминат часовник) → сега", () => {
+  const r = buildVatSubmissionUpdate({ stage_submission_done: false, submission_reference_number: null }, VAT_PDF, "2026-11-14T08:00:00.000Z");
+  assertEquals(r.update?.stage_submission_done_at, "2026-11-14T08:00:00.000Z");
+});
+
+Deno.test("buildVatSubmissionUpdate: НИКОГА не пипа статуса, Прието или другите отметки", () => {
+  const { update } = buildVatSubmissionUpdate({ stage_submission_done: false, submission_reference_number: null }, VAT_PDF, NOW_V13);
+  for (const k of ["status", "completed_at", "confirmation_status", "stage_creation_done", "stage_review_done"]) assert(!(k in update!), k);
+});
+
+Deno.test("rankVatPdfCandidates: само PDF, първо по име (портал/декл.), после най-новите, най-много VAT_PDF_LIMIT", () => {
+  const f = (name: string, mimeType: string, modifiedTime: string): DriveFile => ({ id: name, name, mimeType, modifiedTime });
+  const files = [
+    f("фактура 1.pdf", "application/pdf", "2026-11-13T00:00:00Z"),
+    f("DEKLAR.txt", "text/plain", "2026-11-14T00:00:00Z"),
+    f("ДДСДневници ДеклVIES 2026.10.pdf", "application/pdf", "2026-11-10T00:00:00Z"),
+    f("portal.nra.bg_pls_pub_ivat.pub.ShowDocument_ipId=1.pdf", "application/pdf", "2026-11-14T00:00:00Z"),
+  ];
+  assertEquals(rankVatPdfCandidates(files).map((x) => x.name), [
+    "portal.nra.bg_pls_pub_ivat.pub.ShowDocument_ipId=1.pdf",
+    "ДДСДневници ДеклVIES 2026.10.pdf",
+    "фактура 1.pdf",
+  ]);
+  const many = Array.from({ length: 20 }, (_, i) => f(`ф${i}.pdf`, "application/pdf", "2026-11-01T00:00:00Z"));
+  assertEquals(rankVatPdfCandidates(many).length, VAT_PDF_LIMIT);
 });

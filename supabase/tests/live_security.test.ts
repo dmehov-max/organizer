@@ -98,7 +98,7 @@ T("live: Storage bucket-ите не се листват без вход", async 
 
 T("live: публичните функции отговарят на OPTIONS (CORS) и отказват без токен/тяло", async () => {
   const { url } = await publicConfig();
-  for (const fn of ["upload---document", "client-messages", "reminder-confirm", "forward-to-controlisy"]) {
+  for (const fn of ["upload---document", "client-messages", "reminder-confirm", "forward-to-controlisy", "nap-confirmation-email"]) {
     const opt = await fetch(`${url}/functions/v1/${fn}`, { method: "OPTIONS" });
     await opt.text();
     assert(opt.ok, `${fn}: OPTIONS ${opt.status}`);

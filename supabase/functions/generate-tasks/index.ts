@@ -191,6 +191,22 @@ export function periodsForRule(
   }
 }
 
+export const CONTRIBUTION_CODES = new Set(["obr1", "obr6_monthly", "sol_obr6_annual"]);
+
+/** Плаща ли офисът ТОВА задължение за клиента (0084) — ДДС и
+ * осигуровките са отделни отметки в досието; останалите задължения
+ * с плащане следват общия флаг (= ДДС или осигуровки). Същото като
+ * officePaysFor() в index.html. */
+export function officePaysFor(
+  client: { office_pays_vat?: boolean | null; office_pays_contributions?: boolean | null; office_pays_obligations?: boolean | null } | null | undefined,
+  obligationCode: string | null | undefined,
+): boolean {
+  if (!client) return false;
+  if (obligationCode === "vat_declaration") return !!client.office_pays_vat;
+  if (obligationCode && CONTRIBUTION_CODES.has(obligationCode)) return !!client.office_pays_contributions;
+  return !!client.office_pays_obligations;
+}
+
 // ---------------------------------------------------------------
 // Главна функция
 // ---------------------------------------------------------------
@@ -252,8 +268,8 @@ async function handler(req: Request): Promise<Response> {
       .from("client_obligation_settings")
       .select(`
         enabled, client_id,
-        clients ( id, active, responsible_user_id, tasks_start_date, office_pays_obligations ),
-        obligation_types ( id, deadline_rule, valid_to, requires_payment )
+        clients ( id, active, responsible_user_id, tasks_start_date, office_pays_obligations, office_pays_vat, office_pays_contributions ),
+        obligation_types ( id, code, deadline_rule, valid_to, requires_payment )
       `)
       .eq("enabled", true);
     if (onlyClientId) query = query.eq("client_id", onlyClientId);
@@ -313,7 +329,8 @@ async function handler(req: Request): Promise<Response> {
           // office_pays_obligations (0064, поискано 2026-08-26) — само
           // за клиентите, за които офисът реално превежда парите вместо
           // тях; за другите не се създава запис за плащане изобщо.
-          if (obligation.requires_payment && client.office_pays_obligations && insertedTask) {
+          // От 0084 — ДДС и осигуровките по отделна отметка.
+          if (obligation.requires_payment && officePaysFor(client, obligation.code) && insertedTask) {
             const { error: paymentErr } = await supabase.from("task_payments").insert({
               task_id: insertedTask.id,
               due_date: dueDate,

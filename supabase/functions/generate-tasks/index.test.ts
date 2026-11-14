@@ -7,6 +7,7 @@ import {
   daysBetween,
   dueDateAllowed,
   lastDayOfMonth,
+  officePaysFor,
   pad,
   periodsForRule,
   shiftToBusinessDay,
@@ -191,4 +192,34 @@ Deno.test("periodsForRule: непознат/событиен тип не ген�
   assertEquals(periodsForRule({ type: "quarter_end_plus" }, TODAY), []);
   assertEquals(periodsForRule({ type: "manual" }, TODAY), []);
   assertEquals(periodsForRule({ type: "before_activity_start" }, TODAY), []);
+});
+
+// ---------- officePaysFor() — ДДС и осигуровки отделно (0084) ----------
+
+const VAT_ONLY = { office_pays_vat: true, office_pays_contributions: false, office_pays_obligations: true };
+const CONTRIB_ONLY = { office_pays_vat: false, office_pays_contributions: true, office_pays_obligations: true };
+const NONE = { office_pays_vat: false, office_pays_contributions: false, office_pays_obligations: false };
+
+Deno.test("officePaysFor: ДДС следва само отметката за ДДС", () => {
+  assertEquals(officePaysFor(VAT_ONLY, "vat_declaration"), true);
+  assertEquals(officePaysFor(CONTRIB_ONLY, "vat_declaration"), false);
+});
+
+Deno.test("officePaysFor: обр. 1, обр. 6 и годишният обр. 6 за СОЛ следват само осигуровките", () => {
+  for (const code of ["obr1", "obr6_monthly", "sol_obr6_annual"]) {
+    assertEquals(officePaysFor(CONTRIB_ONLY, code), true, code);
+    assertEquals(officePaysFor(VAT_ONLY, code), false, code);
+  }
+});
+
+Deno.test("officePaysFor: другите с плащане (ГДД, местни данъци…) следват общия флаг", () => {
+  assertEquals(officePaysFor(VAT_ONLY, "gdd_zkpo_92"), true);
+  assertEquals(officePaysFor(CONTRIB_ONLY, "local_taxes"), true);
+  assertEquals(officePaysFor(NONE, "local_taxes"), false);
+});
+
+Deno.test("officePaysFor: няма клиент или нищо не плащаме → false", () => {
+  assertEquals(officePaysFor(null, "vat_declaration"), false);
+  assertEquals(officePaysFor(NONE, "obr1"), false);
+  assertEquals(officePaysFor(NONE, undefined), false);
 });

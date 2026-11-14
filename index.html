@@ -152,6 +152,7 @@
   .pill-completed { background: var(--line); color: var(--muted); }
   .pill-accepted { background: var(--accent-soft); color: var(--accent-ink); }
   .pill-rejected { background: var(--red-soft); color: var(--red); }
+  .pill-pays { background: var(--accent-soft); color: var(--accent-ink); margin-left: 6px; }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .empty { padding: 30px; text-align: center; color: var(--muted); }
   .loading { padding: 30px; text-align: center; color: var(--muted); }
@@ -828,8 +829,12 @@
             <label for="active-cb-panel">Активен клиент</label>
           </div>
           <div class="check-row" style="padding:3px 0">
-            <label class="switch"><input type="checkbox" id="office-pays-cb-panel" /><span class="switch-track"></span></label>
-            <label for="office-pays-cb-panel">Офисът плаща осигуровки/ДДС вместо клиента</label>
+            <label class="switch"><input type="checkbox" id="office-pays-vat-cb-panel" /><span class="switch-track"></span></label>
+            <label for="office-pays-vat-cb-panel">Плащаме ДДС-то вместо клиента</label>
+          </div>
+          <div class="check-row" style="padding:3px 0">
+            <label class="switch"><input type="checkbox" id="office-pays-contrib-cb-panel" /><span class="switch-track"></span></label>
+            <label for="office-pays-contrib-cb-panel">Плащаме осигуровките вместо клиента</label>
           </div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
             <button type="button" id="copy-upload-link-btn" class="small">Копирай линк за качване от клиента</button>
@@ -1759,8 +1764,8 @@ async function loadTasks() {
       files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
       stage_creation_done_at, stage_review_done_at, stage_submission_done_at, note,
-      clients ( name, eik_egn, type, office_pays_obligations, contact_emails ),
-      obligation_types ( name, requires_payment, requires_confirmation_upload ),
+      clients ( name, eik_egn, type, office_pays_obligations, office_pays_vat, office_pays_contributions, contact_emails ),
+      obligation_types ( name, code, requires_payment, requires_confirmation_upload ),
       attachments!attachments_task_id_fkey ( kind, uploaded_at, recognized_reference_number, client_name_mismatch, duplicate_of_attachment_id ),
       task_payments ( id, paid, paid_at )
     `)
@@ -1792,8 +1797,7 @@ async function loadTasks() {
   // изискване за плащане е също толкова "неплатена", просто по-рано
   // се вижда и в основния списък, тук е за да не изчезва от радара
   // след като статусът стане "завършена".
-  const unpaidCount = withLatest.filter(({ t }) =>
-    t.obligation_types?.requires_payment && t.clients?.office_pays_obligations && !t.task_payments?.[0]?.paid).length;
+  const unpaidCount = withLatest.filter(({ t }) => paymentTracked(t) && !t.task_payments?.[0]?.paid).length;
   const { count: activeClients } = await supabase.from("clients").select("id", { count: "exact", head: true }).eq("active", true);
 
   kpis.innerHTML = `
@@ -1810,6 +1814,23 @@ async function loadTasks() {
   populateResponsibleFilter("responsible-filter");
   renderObligationSummary(withLatest);
   renderTaskCards();
+}
+
+// Плаща ли офисът това задължение вместо клиента (0084, поискано
+// 2026-11-14) — ДДС и осигуровките са отделни отметки в досието;
+// останалите задължения с плащане (ГДД, местни данъци…) следват общия
+// флаг office_pays_obligations (= ДДС или осигуровки). Същото като
+// officePaysFor() в generate-tasks.
+const CONTRIBUTION_CODES = new Set(["obr1", "obr6_monthly", "sol_obr6_annual"]);
+function officePaysFor(client, code) {
+  if (!client) return false;
+  if (code === "vat_declaration") return !!client.office_pays_vat;
+  if (CONTRIBUTION_CODES.has(code)) return !!client.office_pays_contributions;
+  return !!client.office_pays_obligations;
+}
+// Следим ли плащането по задачата („Платено“, „Неплатени“).
+function paymentTracked(t) {
+  return !!t.obligation_types?.requires_payment && officePaysFor(t.clients, t.obligation_types?.code);
 }
 
 function populateResponsibleFilter(selectId) {
@@ -1866,7 +1887,7 @@ function renderObligationSummary(withLatest) {
     // превел парите; брои се само за клиенти, за които офисът реално
     // плаща (office_pays_obligations, 0064), за другите плащането не
     // е наша грижа за проследяване.
-    if (t.obligation_types?.requires_payment && t.clients?.office_pays_obligations && !t.task_payments?.[0]?.paid) row.unpaid++;
+    if (paymentTracked(t) && !t.task_payments?.[0]?.paid) row.unpaid++;
     byObligation.set(name, row);
   }
 
@@ -2196,8 +2217,7 @@ function renderProgressTable(sorted) {
   // срок И еднакъв ранг, редът остава какъвто е зададен от "Подреди
   // по" (стабилно сортиране).
   const paymentRank = ({ t }) => {
-    const tracked = !!t.obligation_types?.requires_payment && !!t.clients?.office_pays_obligations;
-    if (!tracked) return 2;
+    if (!paymentTracked(t)) return 2;
     return t.task_payments?.[0]?.paid ? 1 : 0;
   };
   sorted = [...sorted].sort((a, b) =>
@@ -2258,7 +2278,7 @@ function renderProgressTable(sorted) {
   // (clients.office_pays_obligations, виж 0064) — за другите фирми,
   // които си плащат сами, колоната е излишен шум, показва тире.
   const paymentCell = (t) => {
-    if (!t.obligation_types?.requires_payment || !t.clients?.office_pays_obligations) {
+    if (!paymentTracked(t)) {
       return `<td style="text-align:center;color:var(--muted)">—</td>`;
     }
     const payment = t.task_payments?.[0];
@@ -2314,7 +2334,7 @@ function renderProgressTable(sorted) {
   document.getElementById("progress-total-accepted").textContent = `${acceptedCount}/${total}`;
   // Само клиентите с office_pays_obligations участват в брояча —
   // виж бележката при paymentCell по-горе (0064).
-  const payableRows = sorted.filter(({ t }) => t.obligation_types?.requires_payment && t.clients?.office_pays_obligations);
+  const payableRows = sorted.filter(({ t }) => paymentTracked(t));
   if (payableRows.length > 0) {
     const paidCount = payableRows.filter(({ t }) => t.task_payments?.[0]?.paid).length;
     document.getElementById("progress-total-payment").textContent = `${paidCount}/${payableRows.length}`;
@@ -3036,6 +3056,13 @@ document.getElementById("new-client-form").addEventListener("submit", async (e) 
   if (newRow) toggleClientSettings(newRow);
 });
 
+// Име на фирмата в списъка + знак кое плаща офисът вместо нея (0084).
+function clientNameCellHtml(c) {
+  return escapeHtml(c?.name ?? "") +
+    (c?.office_pays_vat ? `<span class="pill pill-pays" title="Плащаме ДДС-то вместо клиента">ДДС</span>` : "") +
+    (c?.office_pays_contributions ? `<span class="pill pill-pays" title="Плащаме осигуровките вместо клиента">Осиг.</span>` : "");
+}
+
 async function loadClients() {
   const body = document.getElementById("clients-body");
   body.innerHTML = `<tr><td colspan="7" class="loading">Зареждане…</td></tr>`;
@@ -3044,7 +3071,7 @@ async function loadClients() {
 
   const { data: rawData, error } = await supabase
     .from("clients")
-    .select("id, name, eik_egn, type, active, responsible_user_id, notes")
+    .select("id, name, eik_egn, type, active, responsible_user_id, notes, office_pays_vat, office_pays_contributions")
     .order("name");
 
   if (error) { body.innerHTML = `<tr><td colspan="7" class="empty">Грешка: ${error.message}</td></tr>`; return; }
@@ -3066,11 +3093,12 @@ async function loadClients() {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
     tr.dataset.id = c.id;
+    tr.dataset.name = c.name ?? "";
     const masked = maskEgn(c.eik_egn, c.type);
     const isMasked = masked !== c.eik_egn;
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td>${escapeHtml(c.name)}</td>
+      <td>${clientNameCellHtml(c)}</td>
       <td>
         <span class="egn-cell">${masked}</span>
         ${isMasked ? `<a class="linklike reveal-egn" data-full="${escapeHtml(c.eik_egn)}" style="margin-left:6px">покажи</a>` : ""}
@@ -3170,7 +3198,8 @@ async function toggleClientSettings(tr) {
   // tr.children[0] е "№" колоната (добавена в 1b6c95c) — Име е сега
   // на индекс 1, не 0. Реален бъг, открит на живо 2026-08-18: записът
   // по-долу презаписваше "№" клетката с името на клиента.
-  const clientName = tr.children[1].textContent;
+  // От data-name, не от текста — клетката носи и знаците ДДС/Осиг. (0084).
+  const clientName = tr.dataset.name ?? tr.children[1].textContent;
   document.getElementById("edit-client-title").textContent = clientName;
   editClientBackdrop.classList.add("open");
 
@@ -3218,7 +3247,7 @@ async function toggleClientSettings(tr) {
   // флаг нито obligation-setting — по изрична заявка е свое поле в
   // досие-блока, не сред чеклиста със задължения.
   const { data: clientRow } = await supabase.from("clients")
-    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_obligations, drive_folder_url, controlisy_purchases_email, controlisy_sales_email, controlisy_bank_folders").eq("id", clientId).single();
+    .select("name, eik_egn, address_city, address_street, active, type, tasks_start_date, responsible_user_id, notes, upload_token, contact_emails, office_pays_vat, office_pays_contributions, drive_folder_url, controlisy_purchases_email, controlisy_sales_email, controlisy_bank_folders").eq("id", clientId).single();
 
   // Линк за клиента да качва документи сам (upload.html?t=<upload_token>,
   // без логин от негова страна) — виж миграция 0059. Копира в клипборда,
@@ -3283,24 +3312,31 @@ async function toggleClientSettings(tr) {
     activeCb.disabled = false;
   };
 
-  // "Офисът плаща вместо клиента" (0064, поискано 2026-08-26) — гейтва
-  // колоната "Платено" в прогрес-таблицата и дали generate-tasks изобщо
-  // създава task_payments запис за бъдещи задачи на този клиент.
-  const officePaysCb = document.getElementById("office-pays-cb-panel");
-  officePaysCb.checked = !!clientRow?.office_pays_obligations;
-  officePaysCb.onchange = async () => {
-    officePaysCb.disabled = true;
-    const { error } = await supabase.from("clients")
-      .update({ office_pays_obligations: officePaysCb.checked }).eq("id", clientId);
-    if (error) {
-      showBanner("Грешка: " + error.message);
-      officePaysCb.checked = !officePaysCb.checked;
-    } else {
-      logAudit("client", clientId, "office_pays_obligations_changed", { office_pays_obligations: officePaysCb.checked });
-      showBanner("Обновено.", "ok");
-    }
-    officePaysCb.disabled = false;
-  };
+  // "Плащаме ДДС" / "Плащаме осигуровките" (0084, поискано 2026-11-14;
+  // преди беше една отметка, 0064) — гейтват колоната "Платено" в
+  // прогрес-таблицата и дали generate-tasks създава task_payments запис
+  // за бъдещи задачи на този клиент (виж officePaysFor()).
+  for (const [cbId, field] of [
+    ["office-pays-vat-cb-panel", "office_pays_vat"],
+    ["office-pays-contrib-cb-panel", "office_pays_contributions"],
+  ]) {
+    const cb = document.getElementById(cbId);
+    cb.checked = !!clientRow?.[field];
+    cb.onchange = async () => {
+      cb.disabled = true;
+      const { error } = await supabase.from("clients").update({ [field]: cb.checked }).eq("id", clientId);
+      if (error) {
+        showBanner("Грешка: " + error.message);
+        cb.checked = !cb.checked;
+      } else {
+        logAudit("client", clientId, `${field}_changed`, { [field]: cb.checked });
+        tr.children[1].innerHTML = clientNameCellHtml({ ...clientRow, [field]: cb.checked });
+        if (clientRow) clientRow[field] = cb.checked;
+        showBanner("Обновено.", "ok");
+      }
+      cb.disabled = false;
+    };
+  }
 
   // Данни на фирмата (Име/ЕИК/Адрес) — истинските, немаскирани
   // стойности идват от базата, не от текста на реда (там ЕГН-то може
@@ -3358,7 +3394,10 @@ async function toggleClientSettings(tr) {
     if (error) { showBanner("Грешка при запис: " + error.message); return; }
     logAudit("client", clientId, "company_data_changed", { name, eik_egn: eik });
     document.getElementById("edit-client-title").textContent = name;
-    tr.children[1].textContent = name; // Име, не "№" (виж бележката в toggleClientSettings)
+    // Име, не "№" (виж бележката в toggleClientSettings); знаците ДДС/Осиг. остават.
+    if (clientRow) clientRow.name = name;
+    tr.dataset.name = name;
+    tr.children[1].innerHTML = clientNameCellHtml({ ...clientRow, name });
     const egnCell = tr.children[2].querySelector(".egn-cell");
     if (egnCell) egnCell.textContent = maskEgn(eik, clientRow?.type);
     const noteInput = tr.querySelector("textarea.note-input");

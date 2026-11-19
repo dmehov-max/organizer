@@ -1766,7 +1766,7 @@ async function loadTasks() {
     .from("tasks")
     .select(`
       id, period_label, due_date, status, assigned_user_id, confirmation_status, completed_at,
-      files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction,
+      files_generated_detected_at, drive_detected_vat_amount, drive_detected_vat_direction, drive_detected_contrib_total,
       stage_creation_done, stage_review_done, stage_submission_done, submission_reference_number,
       stage_creation_done_at, stage_review_done_at, stage_submission_done_at, note,
       clients ( name, eik_egn, type, office_pays_obligations, office_pays_vat, office_pays_contributions, contact_emails ),
@@ -2080,7 +2080,8 @@ function renderTaskCards() {
         ${latest?.recognized_reference_number ? `<div class="ref">Вх. № ${escapeHtml(latest.recognized_reference_number)}</div>` : ""}
         ${t.submission_reference_number ? `<div class="ref">№ декларация ${escapeHtml(t.submission_reference_number)}</div>` : ""}
         ${t.files_generated_detected_at ? `<div class="ref">📁 файлове в Drive от ${new Date(t.files_generated_detected_at).toLocaleDateString("bg-BG")}</div>` : ""}
-        ${t.drive_detected_vat_amount != null ? `<div class="ref">ДДС ${t.drive_detected_vat_direction === "refund" ? "за възстановяване" : "за внасяне"}: ${t.drive_detected_vat_amount.toFixed(2)} лв. (от Drive, само за справка)</div>` : ""}
+        ${t.drive_detected_vat_amount != null ? `<div class="ref">ДДС ${t.drive_detected_vat_direction === "refund" ? "за възстановяване" : "за внасяне"}: ${Number(t.drive_detected_vat_amount).toFixed(2)} € (от Drive, само за справка)</div>` : ""}
+        ${t.drive_detected_contrib_total != null ? `<div class="ref">Осигуровки и данък за внасяне: ${Number(t.drive_detected_contrib_total).toFixed(2)} € (от „Дължими вноски към НАП“, само за справка)</div>` : ""}
       </div>
       <div class="meta">
         <span class="pill pill-${t.status}">${STATUS_LABEL[t.status] ?? t.status}</span>
@@ -2287,8 +2288,17 @@ function renderProgressTable(sorted) {
   // възстановяване със знак минус в зелено. Идва от DEKLAR.txt в Drive
   // (swift-worker, drive_detected_vat_amount) — празно, докато
   // справката не е качена.
+  // Обр. 1 и обр. 6 (поискано 2026-11-19, „по логиката на ДДС“) —
+  // сумата за внасяне от „Дължими вноски към НАП“ (swift-worker v14,
+  // drive_detected_contrib_total), в червено. Едно и също число на двата
+  // реда на фирмата, защото е един PDF за месеца.
   const vatAmountHtml = (t) => {
-    if (t.obligation_types?.code !== "vat_declaration" || t.drive_detected_vat_amount == null) return "";
+    const code = t.obligation_types?.code;
+    if ((code === "obr1" || code === "obr6_monthly") && t.drive_detected_contrib_total != null) {
+      const total = Number(t.drive_detected_contrib_total);
+      return `<div class="vat-amount vat-due" title="Осигуровки и данък по ЗДДФЛ за внасяне (от „Дължими вноски към НАП“)">${total.toFixed(2)} €</div>`;
+    }
+    if (code !== "vat_declaration" || t.drive_detected_vat_amount == null) return "";
     const refund = t.drive_detected_vat_direction === "refund";
     const amount = Number(t.drive_detected_vat_amount);
     const text = `${refund && amount !== 0 ? "−" : ""}${amount.toFixed(2)} €`;

@@ -5,6 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   base64url,
+  buildContributionsUpdate,
   buildDeclarationUpdate,
   buildEstiUpdate,
   buildVatSubmissionUpdate,
@@ -17,11 +18,13 @@ import {
   isValidDriveFolderId,
   isValidEik,
   normalizeFolderName,
+  parseContributionsPdf,
   parseDeklarVatAmount,
   parseNapDeclarationFileName,
   parseVatPortalPdf,
   parseYearMonth,
   pemToArrayBuffer,
+  pickContributionsPdfs,
   pickDeclarationFile,
   rankVatPdfCandidates,
   referenceKey,
@@ -677,4 +680,82 @@ Deno.test("rankVatPdfCandidates: само PDF, първо по име (порт�
   ]);
   const many = Array.from({ length: 20 }, (_, i) => f(`ф${i}.pdf`, "application/pdf", "2026-11-01T00:00:00Z"));
   assertEquals(rankVatPdfCandidates(many).length, VAT_PDF_LIMIT);
+});
+// ---------- parseContributionsPdf() / pickContributionsPdfs() ----------
+
+// Реалният текст на „Дължими вноски към НАП - кратка 2026.10.pdf“, както
+// го дава unpdf (19.11.2026); име, ЕИК и лицата са подменени.
+const CONTRIB_PDF_UNPDF = [
+  "Дължими вноски към НАП",
+  "на ПЛЕЙСХОЛДЪР ЕООД, ЕИК: 100000009",
+  "от 10.2026 г. до 10.2026 г.",
+  "31.50ДЗПО в УПФ от самоосигуряващи се",
+  "Държавно обществено осигуряване и др. Сума",
+  "ДОО и ТЗПБ работници и служители",
+  "ДЗПО в УПФ",
+  "0.00", "0.00", "115.29", "0.00", "0.00", "0.00", "0.00", "0.00",
+  "Фонд Пенсии в размера за УПФ",
+  "Здравно осигуряване",
+  "Данък по ЗДДФЛ",
+  "0.00", "50.40", "0.00", "0.00",
+  "Осиг. вноски за ДОО, ТЗПБ, ГВРС и Уч. ПФ",
+  "Осиг. вноски за ДЗПО в УПФ /самоосигуряващи се лица/",
+  "0.00", "0.00", "0.00", "0.00", "115.29", "50.40", "31.50", "0.00", "0.00",
+  "Фонд Пенсии в размера за ППФ 0,00",
+  "BG97BNBG96618000112001",
+  "BG65BNBG96618000111801",
+  "Общо за фирмата",
+  "Управител: ИМЕ ФАМИЛИЯ",
+  "Общо осигуровки и данък за месеца: 197.19",
+  "1",
+].join("\n");
+
+Deno.test("parseContributionsPdf: реална подредба на unpdf — ЕИК, месец, общо", () => {
+  assertEquals(parseContributionsPdf(CONTRIB_PDF_UNPDF), { eik: "100000009", year: 2026, month: 10, total: 197.19 });
+});
+
+Deno.test("parseContributionsPdf: самопроверката отхвърля сбор ≠ 2 × общо", () => {
+  assertEquals(parseContributionsPdf(CONTRIB_PDF_UNPDF.replace("115.29\n50.40", "115.92\n50.40")), null);
+  assertEquals(parseContributionsPdf(CONTRIB_PDF_UNPDF.replace("месеца: 197.19", "месеца: 197.91")), null);
+});
+
+Deno.test("parseContributionsPdf: хиляди с интервал („2 064.32“, реален случай 09.2026)", () => {
+  const big = CONTRIB_PDF_UNPDF
+    .replaceAll("115.29", "1 115.29")
+    .replace("месеца: 197.19", "месеца: 1 197.19");
+  assertEquals(parseContributionsPdf(big)?.total, 1197.19);
+});
+
+Deno.test("parseContributionsPdf: ред „Дата 17.11.2026г.“ не се брои за сума (ДЖИ ДИ ЕМ ГРУП 10.2026)", () => {
+  const dated = CONTRIB_PDF_UNPDF.replace(/\n1$/, "\n1Дата 17.11.2026г. 10:33 ч.");
+  assertEquals(parseContributionsPdf(dated)?.total, 197.19);
+});
+
+Deno.test("parseContributionsPdf: справка за няколко месеца или друг документ → null", () => {
+  assertEquals(parseContributionsPdf(CONTRIB_PDF_UNPDF.replace("до 10.2026", "до 12.2026")), null);
+  assertEquals(parseContributionsPdf("Рекапитулация - стандартна\nОбщо осигуровки и данък за месеца: 1.00"), null);
+});
+
+Deno.test("parseContributionsPdf: нулева справка (само самоосигуряващ се без вноски) → 0", () => {
+  const zero = CONTRIB_PDF_UNPDF.replace(/\d+\.\d{2}(?!\d)/g, "0.00");
+  assertEquals(parseContributionsPdf(zero)?.total, 0);
+});
+
+Deno.test("pickContributionsPdfs: само „Дължими вноски“, най-новият първи", () => {
+  const f = (name: string, mimeType: string, modifiedTime?: string): DriveFile => ({ id: name, name, mimeType, modifiedTime });
+  assertEquals(pickContributionsPdfs([
+    f("Рекапитулация - стандартна 2026.10.pdf", "application/pdf", "2026-11-17T11:20:00Z"),
+    f("Дължими вноски към НАП - кратка 2026.10.pdf", "application/pdf", "2026-11-17T11:20:00Z"),
+    f("Дължими вноски към НАП - кратка 2026.10 (1).pdf", "application/pdf", "2026-11-18T09:00:00Z"),
+    f("Дължими вноски.txt", "text/plain", "2026-11-19T09:00:00Z"),
+  ]).map((x) => x.name), [
+    "Дължими вноски към НАП - кратка 2026.10 (1).pdf",
+    "Дължими вноски към НАП - кратка 2026.10.pdf",
+  ]);
+});
+
+Deno.test("buildContributionsUpdate: нова или сменена сума се пише, същата — не", () => {
+  assertEquals(buildContributionsUpdate({ drive_detected_contrib_total: null }, 197.19), { drive_detected_contrib_total: 197.19 });
+  assertEquals(buildContributionsUpdate({ drive_detected_contrib_total: "197.19" }, 197.19), null);
+  assertEquals(buildContributionsUpdate({ drive_detected_contrib_total: 29.77 }, 197.19), { drive_detected_contrib_total: 197.19 });
 });

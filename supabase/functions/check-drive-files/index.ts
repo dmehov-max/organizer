@@ -27,6 +27,8 @@
 // v13 (2026-11-14): "Подаване" на ДДС от PDF-а на подадената справка-
 // декларация от портала на НАП в месечната папка — входящият номер се
 // записва в задачата (виж parseVatPortalPdf / buildVatSubmissionUpdate).
+// v14 (2026-11-19): обр. 1 и обр. 6 — сумата за внасяне от „Дължими
+// вноски към НАП - кратка ГГГГ.ММ.pdf“ (виж parseContributionsPdf).
 //
 // Изисква secrets:
 //   GOOGLE_SERVICE_ACCOUNT_KEY — цялото JSON съдържание на ключа
@@ -500,6 +502,72 @@ export function buildDeclarationUpdate(
 }
 
 // ---------------------------------------------------------------
+// Осигуровки (обр. 1 и обр. 6): сумата от „Дължими вноски към НАП -
+// кратка ГГГГ.ММ.pdf“ (Microinvest ТРЗ), поискано 19.11.2026 — „по
+// логиката на ДДС“. Само за справка в колона „Платено“, както ДДС.
+// ---------------------------------------------------------------
+
+/** Задълженията, при които се показва сумата за внасяне. */
+export const CONTRIBUTION_AMOUNT_CODES = new Set(["obr1", "obr6_monthly"]);
+
+export type ContributionsPdf = { eik: string; year: number; month: number; total: number };
+
+/** Текстът на PDF-а → ЕИК, месец и „Общо осигуровки и данък за месеца“.
+ * null, ако не е тази справка или самопроверката не мине.
+ *
+ * Самопроверка: unpdf разбърква реда на етикетите и сумите, но всяка
+ * сума в справката се среща точно два пъти — веднъж в подробната част
+ * (ДОО, ЗО, ДЗПО, данък) и веднъж в обобщението по сметки. Затова
+ * сборът на всички суми (без реда „Общо…“) трябва да е точно 2 × Общо.
+ * Иначе — нищо: по-добре липсваща сума, отколкото грешна.
+ * Сумите са с точка ("115.29"); "0,00" (ППФ) и IBAN-ите не влизат. */
+export function parseContributionsPdf(text: string): ContributionsPdf | null {
+  if (!/Дължими\s+вноски\s+към\s+НАП/i.test(text)) return null;
+  const eik = /ЕИК:\s*(\d{9,13})\b/.exec(text);
+  const period = /от\s+(\d{2})\.(\d{4})\s*г\.\s*до\s+(\d{2})\.(\d{4})\s*г\./.exec(text);
+  // Хилядите идват с интервал: "2 064.32" (реален случай 09.2026).
+  const totalRe = /Общо\s+осигуровки\s+и\s+данък\s+за\s+месеца:\s*(-?\d{1,3}(?:[  ]\d{3})+\.\d{2}|-?\d+\.\d{2})(?!\d)/;
+  const total = totalRe.exec(text);
+  if (!eik || !period || !total) return null;
+  if (period[1] !== period[3] || period[2] !== period[4]) return null; // справка за повече от един месец
+  const month = Number(period[1]);
+  if (month < 1 || month > 12) return null;
+  const cents = (s: string) => Math.round(Number(s.replace(/[  ]/g, "")) * 100);
+  const totalCents = cents(total[1]);
+  const rest = text.replace(totalRe, "");
+  let sum = 0;
+  let count = 0;
+  for (const m of rest.matchAll(/(?<![\d.,])-?(?:\d{1,3}(?:[  ]\d{3})+|\d+)\.\d{2}(?![\d.])/g)) { // (?![\d.]) — не и дата "17.11.2026"
+    sum += cents(m[0]);
+    count++;
+  }
+  if (count === 0 || sum !== 2 * totalCents) return null;
+  return { eik: eik[1], year: Number(period[2]), month, total: totalCents / 100 };
+}
+
+/** PDF-ите „Дължими вноски…“ от папката — най-новият първи (при
+ * преизчисляване на заплатите Microinvest пише нов файл). */
+export function pickContributionsPdfs(files: DriveFile[]): DriveFile[] {
+  const time = (f: DriveFile) => {
+    const t = f.modifiedTime ? Date.parse(f.modifiedTime) : NaN;
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  return files
+    .filter((f) => f.mimeType === "application/pdf" && /Дължими\s+вноски/i.test(f.name))
+    .sort((a, b) => time(b) - time(a));
+}
+
+/** Какво се пише в задачата обр. 1 / обр. 6. null = без промяна. */
+export function buildContributionsUpdate(
+  task: { drive_detected_contrib_total?: number | string | null },
+  total: number,
+): Record<string, unknown> | null {
+  const old = task.drive_detected_contrib_total == null ? null : Number(task.drive_detected_contrib_total);
+  if (old !== null && Math.abs(old - total) < 0.005) return null;
+  return { drive_detected_contrib_total: total };
+}
+
+// ---------------------------------------------------------------
 // Drive API — тънка обвивка (не се тества директно, само чрез
 // чистите функции по-горе; мрежовите извиквания са интеграционни).
 // ---------------------------------------------------------------
@@ -695,6 +763,19 @@ async function handler(req: Request): Promise<Response> {
       .eq("obligation_types.code", "vat_declaration")
       .or("stage_submission_done.eq.false,submission_reference_number.is.null");
     if (vatSubmitErr) throw vatSubmitErr;
+
+    // v14: обр. 1 и обр. 6 — сумата от „Дължими вноски към НАП“ (виж
+    // parseContributionsPdf). Последните ~60 дни, без значение от
+    // статуса (сумата се вижда и в затворена задача, както при ДДС).
+    const { data: contribTasks, error: contribErr } = await supabase
+      .from("tasks")
+      .select(
+        "id, period_label, client_id, drive_detected_contrib_total, drive_detected_contrib_source, clients ( name, eik_egn, drive_folder_id ), obligation_types!inner ( code )",
+      )
+      .eq("not_applicable", false)
+      .gte("period_end", vatSince)
+      .in("obligation_types.code", [...CONTRIBUTION_AMOUNT_CODES]);
+    if (contribErr) throw contribErr;
 
     const seenIds = new Set((tasks ?? []).map((t: any) => t.id));
     const allTasks: any[] = [...(tasks ?? [])];
@@ -974,18 +1055,109 @@ async function handler(req: Request): Promise<Response> {
       }
     }
 
+    // Осигуровки: обр. 1 и обр. 6 на една фирма за месеца делят един и
+    // същ PDF — затова се търси веднъж за двойката фирма + период.
+    let contribAmountsFound = 0;
+    const contribGroups = new Map<string, any[]>();
+    for (const t of (contribTasks ?? []) as any[]) {
+      const key = `${t.client_id}|${t.period_label}`;
+      if (!contribGroups.has(key)) contribGroups.set(key, []);
+      contribGroups.get(key)!.push(t);
+    }
+    // Първо двойките без сума — иначе при спиране по време едни и същи
+    // фирми в края на списъка никога не идват на ред.
+    const orderedGroups = [...contribGroups.values()].sort((a, b) =>
+      Number(a.every((t: any) => t.drive_detected_contrib_total != null)) -
+      Number(b.every((t: any) => t.drive_detected_contrib_total != null))
+    );
+    for (const group of orderedGroups) {
+      if (Date.now() - startedAt > 125_000) {
+        skipped.push("contrib: спряно по време, останалите — при следващото пускане");
+        break;
+      }
+      const first = group[0];
+      try {
+        const ym = parseYearMonth(first.period_label);
+        const eik: string | undefined = first.clients?.eik_egn;
+        if (!ym || !isValidEik(eik)) continue;
+        const client = { name: first.clients?.name ?? "", drive_folder_id: first.clients?.drive_folder_id as string | null };
+        const cacheKey: string = first.client_id ?? client.name;
+        let clientFolder = clientFolderCache.get(cacheKey);
+        if (clientFolder === undefined) {
+          let resolved = resolveClientFolder(client, topFolders);
+          if (resolved === "needsTopFolders") {
+            topFolders = await driveListChildren(accessToken, firmiFolderId, " and mimeType = 'application/vnd.google-apps.folder'");
+            resolved = resolveClientFolder(client, topFolders);
+          }
+          clientFolder = resolved === "needsTopFolders" ? null : resolved;
+          clientFolderCache.set(cacheKey, clientFolder);
+        }
+        if (!clientFolder) continue;
+
+        // <фирма>/<ГГГГ>/<ММ.ГГГГ>/ и подпапка ТРЗ в нея.
+        const yearFolder = await findChildFolder(accessToken, clientFolder.id, String(ym.year));
+        if (!yearFolder) continue;
+        let monthFolder: { id: string } | null = null;
+        for (const candidate of candidateMonthFolderNames(ym.year, ym.month)) {
+          monthFolder = await findChildFolder(accessToken, yearFolder.id, candidate);
+          if (monthFolder) break;
+        }
+        if (!monthFolder) continue;
+        const files: DriveFile[] = await driveListChildren(accessToken, monthFolder.id, " and mimeType = 'application/pdf'");
+        const trz = await findChildFolder(accessToken, monthFolder.id, "ТРЗ");
+        if (trz) files.push(...await driveListChildren(accessToken, trz.id, " and mimeType = 'application/pdf'"));
+
+        for (const file of pickContributionsPdfs(files)) {
+          const source = `${file.id}@${file.modifiedTime ?? ""}`;
+          // Същият файл, вече прочетен за всички задачи → нищо за правене.
+          if (group.every((t: any) => t.drive_detected_contrib_source === source)) break;
+          const res = await fetch(`${DRIVE_FILES_URL}/${file.id}?alt=media`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (!res.ok) continue;
+          let parsed: ContributionsPdf | null = null;
+          try {
+            const doc = await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
+            const { text } = await extractText(doc, { mergePages: true });
+            parsed = parseContributionsPdf(text);
+          } catch (_e) {
+            parsed = null; // повреден/сканиран PDF
+          }
+          if (!parsed) {
+            skipped.push(`contrib ${client.name} ${first.period_label}: „${file.name}“ не мина проверката — сумата не е записана`);
+            continue;
+          }
+          if (parsed.eik !== eik || parsed.year !== ym.year || parsed.month !== ym.month) {
+            skipped.push(`contrib ${client.name} ${first.period_label}: „${file.name}“ е за ЕИК ${parsed.eik}, ${parsed.month}.${parsed.year} — пропуснат`);
+            continue;
+          }
+          for (const t of group) {
+            const upd = buildContributionsUpdate(t, parsed.total) ?? {};
+            if (t.drive_detected_contrib_source !== source) upd.drive_detected_contrib_source = source;
+            if (Object.keys(upd).length === 0) continue;
+            const { error: cErr } = await supabase.from("tasks").update(upd).eq("id", t.id);
+            if (cErr) throw cErr;
+            if ("drive_detected_contrib_total" in upd) contribAmountsFound++;
+          }
+          break; // най-новият валиден файл решава
+        }
+      } catch (e) {
+        errors.push(`contrib ${first.id}: ${String(e)}`);
+      }
+    }
+
     await supabase.from("cron_heartbeats").insert({
       job_name: JOB_NAME,
       status: errors.length === 0 ? "ok" : "error",
       details: `checked=${checked} found=${found} decl_checked=${declarationsChecked} decl_found=${declarationsFound}` +
-        ` vat_amounts=${vatAmountsFound} vat_created=${creationsMarked} vat_submitted=${vatSubmissionsMarked}` +
+        ` vat_amounts=${vatAmountsFound} vat_created=${creationsMarked} vat_submitted=${vatSubmissionsMarked} contrib=${contribAmountsFound}` +
         ` skipped=${skipped.length} errors=${errors.length}` +
         (errors.length ? ` :: ${errors.slice(0, 5).join(" | ")}` : ""),
     });
 
     return new Response(JSON.stringify({
       ok: errors.length === 0, checked, found, declarationsChecked, declarationsFound, vatAmountsFound, creationsMarked,
-      vatSubmissionsMarked, skipped, errors,
+      vatSubmissionsMarked, contribAmountsFound, skipped, errors,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

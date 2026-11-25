@@ -2296,7 +2296,10 @@ function renderProgressTable(sorted) {
     const code = t.obligation_types?.code;
     if ((code === "obr1" || code === "obr6_monthly") && t.drive_detected_contrib_total != null) {
       const total = Number(t.drive_detected_contrib_total);
-      return `<div class="vat-amount vat-due" title="Осигуровки и данък по ЗДДФЛ за внасяне (от „Дължими вноски към НАП“)">${total.toFixed(2)} €</div>`;
+      // Червено само докато ние дължим превода (поискано 2026-11-25):
+      // платено от нас или фирма, която си плаща сама → зелено.
+      const ours = paymentTracked(t) && !t.task_payments?.[0]?.paid;
+      return `<div class="vat-amount ${ours ? "vat-due" : "vat-refund"}" title="Осигуровки и данък по ЗДДФЛ за внасяне (от „Дължими вноски към НАП“)">${total.toFixed(2)} €</div>`;
     }
     if (code !== "vat_declaration" || t.drive_detected_vat_amount == null) return "";
     const refund = t.drive_detected_vat_direction === "refund";
